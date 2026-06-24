@@ -1,0 +1,15 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Authenticated users can read/write their own site diary data.
+    // Adjust collection paths when wiring real features.
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /sites/{siteId}/{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

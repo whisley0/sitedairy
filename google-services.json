@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "898373108005",
+    "project_id": "sitediary-e91dd",
+    "storage_bucket": "sitediary-e91dd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:898373108005:android:b38f71c2422ebd1799dacc",
+        "android_client_info": {
+          "package_name": "com.sitediary.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD2mvNMpSe52TjPWO9mw8-I7Bv3bCiPK8U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
