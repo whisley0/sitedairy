@@ -1,0 +1,24 @@
+{
+  "train": {
+    "ceiling": 6214,
+    "facade": 324,
+    "flooring": 3639,
+    "housekeeping": 984,
+    "mep": 22512,
+    "paint": 512,
+    "safety": 4947,
+    "structural": 18651,
+    "waterproofing": 3386
+  },
+  "val": {
+    "ceiling": 1028,
+    "facade": 32,
+    "flooring": 537,
+    "housekeeping": 160,
+    "mep": 4769,
+    "paint": 84,
+    "safety": 887,
+    "structural": 3655,
+    "waterproofing": 596
+  }
+}

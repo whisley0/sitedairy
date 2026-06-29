@@ -1,0 +1,28 @@
+{
+  "train": {
+    "concrete_work": 21156,
+    "fall_hazard": 2056,
+    "floor_dry": 4608,
+    "formwork": 8538,
+    "housekeeping": 2061,
+    "paint_finish": 310,
+    "ppe": 21209,
+    "rebar_fixing": 1150,
+    "surface_defect": 6004,
+    "tbar_setup": 8170,
+    "waterproofing": 10410
+  },
+  "val": {
+    "concrete_work": 4121,
+    "fall_hazard": 421,
+    "floor_dry": 777,
+    "formwork": 1848,
+    "housekeeping": 381,
+    "paint_finish": 79,
+    "ppe": 3988,
+    "rebar_fixing": 243,
+    "surface_defect": 1046,
+    "tbar_setup": 1685,
+    "waterproofing": 1992
+  }
+}

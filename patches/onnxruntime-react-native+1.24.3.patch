@@ -1,0 +1,36 @@
+diff --git a/node_modules/onnxruntime-react-native/android/CMakeLists.txt b/node_modules/onnxruntime-react-native/android/CMakeLists.txt
+index 2f814e8..ce475cb 100644
+--- a/node_modules/onnxruntime-react-native/android/CMakeLists.txt
++++ b/node_modules/onnxruntime-react-native/android/CMakeLists.txt
+@@ -87,6 +87,14 @@ set_target_properties(
+              CXX_EXTENSIONS OFF
+              POSITION_INDEPENDENT_CODE ON)
+ 
++# Android 15+ requires native libraries to support 16 KB memory page sizes.
++# The NDK defaults to 4 KB ELF segment alignment, which makes libonnxruntimejsi.so
++# fail Google Play's / the installer's 16 KB alignment check. Force 16 KB alignment.
++# (matches microsoft/onnxruntime PR #27523; not present in 1.24.3)
++if(ANDROID)
++  target_link_options(onnxruntimejsi PRIVATE "-Wl,-z,max-page-size=16384")
++endif()
++
+ find_library(log-lib log)
+ 
+ target_link_libraries(
+diff --git a/node_modules/onnxruntime-react-native/android/build.gradle b/node_modules/onnxruntime-react-native/android/build.gradle
+index 41b4359..dda4580 100644
+--- a/node_modules/onnxruntime-react-native/android/build.gradle
++++ b/node_modules/onnxruntime-react-native/android/build.gradle
+@@ -247,7 +247,11 @@ dependencies {
+     extractLibs "com.microsoft.onnxruntime:onnxruntime-android:latest.integration@aar"
+   }
+ 
+-  if (VersionNumber.parse(REACT_NATIVE_VERSION) < VersionNumber.parse("0.71")) {
++  // Patched: org.gradle.util.VersionNumber was removed in Gradle 9 (used by SDK 56 / RN 0.85).
++  // The fbjni headers branch only applied to React Native < 0.71, which this toolchain is far past,
++  // so we compare the version numerically instead of relying on the removed VersionNumber API.
++  def rnMinor = (REACT_NATIVE_VERSION =~ /^\d+\.(\d+)/) ? ((REACT_NATIVE_VERSION =~ /^\d+\.(\d+)/)[0][1] as int) : 99
++  if (rnMinor < 71) {
+     extractLibs "com.facebook.fbjni:fbjni:+:headers"
+     extractLibs "com.facebook.fbjni:fbjni:+"
+   }

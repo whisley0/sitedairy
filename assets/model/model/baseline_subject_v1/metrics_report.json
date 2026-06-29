@@ -1,0 +1,183 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-06-26T18:03:56.483552+00:00",
+  "task_head": "subject",
+  "task_mode": "multilabel",
+  "device": "cpu",
+  "train_examples": 30394,
+  "val_examples": 5848,
+  "test_split_used": false,
+  "best_epoch": 4,
+  "best_selection_metric": 0.7691,
+  "selection_metric_name": "f1_macro",
+  "checkpoint_path": "C:\\Software\\PythonProject\\fullstackRAG\\FullStack_RAG\\data\\cdv\\training\\runs\\baseline_subject_v1\\checkpoint_best.pt",
+  "config_path": "C:\\Software\\PythonProject\\fullstackRAG\\FullStack_RAG\\data\\cdv\\training\\runs\\baseline_subject_v1\\training_config.json",
+  "class_distribution_path": "C:\\Software\\PythonProject\\fullstackRAG\\FullStack_RAG\\data\\cdv\\training\\runs\\baseline_subject_v1\\class_distribution.json",
+  "transfer_learning": {
+    "enabled": true,
+    "stage2_ran": true,
+    "stage1_initial_val_metric": 0.3234,
+    "stage1_best_metric": 0.6948,
+    "stage1_best_epoch": 2,
+    "stage2_eligible": true,
+    "stage2_initial_val_metric": 0.6948,
+    "stage2_best_metric": 0.7691,
+    "stage2_best_epoch": 4
+  },
+  "history": [
+    {
+      "stage": "stage1_head",
+      "epoch": 1,
+      "train": {
+        "f1_macro": 0.6567,
+        "num_examples": 30394,
+        "loss": 0.3584
+      },
+      "val": {
+        "f1_macro": 0.6884,
+        "num_examples": 5848,
+        "loss": 0.3268
+      }
+    },
+    {
+      "stage": "stage1_head",
+      "epoch": 2,
+      "train": {
+        "f1_macro": 0.6784,
+        "num_examples": 30394,
+        "loss": 0.3401
+      },
+      "val": {
+        "f1_macro": 0.6948,
+        "num_examples": 5848,
+        "loss": 0.3241
+      }
+    },
+    {
+      "stage": "stage1_head",
+      "epoch": 3,
+      "train": {
+        "f1_macro": 0.6803,
+        "num_examples": 30394,
+        "loss": 0.3388
+      },
+      "val": {
+        "f1_macro": 0.6868,
+        "num_examples": 5848,
+        "loss": 0.3217
+      }
+    },
+    {
+      "stage": "stage2_finetune",
+      "epoch": 1,
+      "train": {
+        "f1_macro": 0.724,
+        "num_examples": 30394,
+        "loss": 0.3028
+      },
+      "val": {
+        "f1_macro": 0.7586,
+        "num_examples": 5848,
+        "loss": 0.2687
+      }
+    },
+    {
+      "stage": "stage2_finetune",
+      "epoch": 2,
+      "train": {
+        "f1_macro": 0.7652,
+        "num_examples": 30394,
+        "loss": 0.2613
+      },
+      "val": {
+        "f1_macro": 0.7653,
+        "num_examples": 5848,
+        "loss": 0.2646
+      }
+    },
+    {
+      "stage": "stage2_finetune",
+      "epoch": 3,
+      "train": {
+        "f1_macro": 0.7904,
+        "num_examples": 30394,
+        "loss": 0.2367
+      },
+      "val": {
+        "f1_macro": 0.7633,
+        "num_examples": 5848,
+        "loss": 0.2678
+      }
+    },
+    {
+      "stage": "stage2_finetune",
+      "epoch": 4,
+      "train": {
+        "f1_macro": 0.8153,
+        "num_examples": 30394,
+        "loss": 0.2132
+      },
+      "val": {
+        "f1_macro": 0.7691,
+        "num_examples": 5848,
+        "loss": 0.2689
+      }
+    },
+    {
+      "stage": "stage2_finetune",
+      "epoch": 5,
+      "train": {
+        "f1_macro": 0.8374,
+        "num_examples": 30394,
+        "loss": 0.1914
+      },
+      "val": {
+        "f1_macro": 0.7625,
+        "num_examples": 5848,
+        "loss": 0.2797
+      }
+    },
+    {
+      "stage": "stage2_finetune",
+      "epoch": 6,
+      "train": {
+        "f1_macro": 0.8596,
+        "num_examples": 30394,
+        "loss": 0.171
+      },
+      "val": {
+        "f1_macro": 0.7676,
+        "num_examples": 5848,
+        "loss": 0.2948
+      }
+    },
+    {
+      "stage": "stage2_finetune",
+      "epoch": 7,
+      "train": {
+        "f1_macro": 0.8753,
+        "num_examples": 30394,
+        "loss": 0.1548
+      },
+      "val": {
+        "f1_macro": 0.7584,
+        "num_examples": 5848,
+        "loss": 0.3077
+      }
+    },
+    {
+      "stage": "stage2_finetune",
+      "epoch": 8,
+      "train": {
+        "f1_macro": 0.8876,
+        "num_examples": 30394,
+        "loss": 0.1413
+      },
+      "val": {
+        "f1_macro": 0.7618,
+        "num_examples": 5848,
+        "loss": 0.3172
+      }
+    }
+  ]
+}

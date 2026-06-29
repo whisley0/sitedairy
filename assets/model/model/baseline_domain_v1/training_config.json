@@ -1,0 +1,47 @@
+{
+  "version": "1.0",
+  "run_name": "baseline_domain_v1",
+  "data": {
+    "manifest_path": "C:\\Software\\PythonProject\\fullstackRAG\\FullStack_RAG\\data\\cdv\\manifests\\dataset_v1.jsonl",
+    "row_assignments_path": null,
+    "site_photos_only": true,
+    "min_sample_weight": 0.0,
+    "min_taxonomy_confidence": 0.0
+  },
+  "task": {
+    "head": "domain",
+    "mode": "multilabel",
+    "exclude_missing_labels": true,
+    "use_sample_weights": true,
+    "sample_weight_strategy": "taxonomy",
+    "use_class_weights": true
+  },
+  "model": {
+    "architecture": "resnet18",
+    "pretrained": true,
+    "image_size": 224,
+    "dropout": 0.2
+  },
+  "training": {
+    "batch_size": 32,
+    "epochs": 15,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "num_workers": 0,
+    "seed": 42,
+    "device": null,
+    "early_stop_patience": 4,
+    "show_progress": true
+  },
+  "transfer_learning": {
+    "enabled": true,
+    "head_epochs": 3,
+    "finetune_epochs": 12,
+    "head_learning_rate": 0.001,
+    "finetune_learning_rate": 0.0001,
+    "unfreeze_last_block": true
+  },
+  "output": {
+    "run_dir": "C:\\Software\\PythonProject\\fullstackRAG\\FullStack_RAG\\data\\cdv\\training\\runs\\baseline_domain_v1"
+  }
+}

@@ -19,7 +19,17 @@
           "photosPermission": "Allow Site Diary to access your photos for observation attachments.",
           "cameraPermission": "Allow Site Diary to use the camera for observation photos."
         }
-      ]
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Site Diary to use the microphone for on-device voice transcription."
+        }
+      ],
+      "onnxruntime-react-native",
+      "./plugins/withOnnxruntimeAndroid",
+      "expo-build-properties",
+      "llama.rn"
     ],
     "ios": {
       "supportsTablet": true,

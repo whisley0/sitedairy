@@ -13,6 +13,22 @@ Includes Firebase SDK wiring and a **mock UI** that does not call real Auth or F
 | **Observations** | Site observations (billable items flagged) |
 | **Conditions** | Safety & quality issues |
 | **Escalate** | Emergency escalation to upper management |
+| **Chat** | On-device Gemini Nano chatbot (Android, ML Kit GenAI) |
+
+## Gemini Nano chat (Android only)
+
+The **Chat** tab uses **ML Kit GenAI Prompt API** to run **Gemini Nano on-device** on supported phones (including many Pixel devices with AICore).
+
+- Shows model status (available / downloadable / unavailable)
+- Displays **response time in ms** so you can measure efficiency
+- Requires a **native Android build** — does not work in Expo Go
+
+```bash
+cd C:\Projects\sitedairy
+npm run android:clean
+```
+
+**Pixel 8 note:** Google’s supported-device list changes over time. If status shows **Unavailable**, ensure AICore is installed/updated, the bootloader is locked, and the device has internet for first-time model config.
 
 ## Firebase setup (done)
 

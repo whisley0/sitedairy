@@ -1,0 +1,12 @@
+{
+  "train": {
+    "defect": 69,
+    "no_defect": 14377,
+    "uncertain_requires_human_review": 19756
+  },
+  "val": {
+    "defect": 18,
+    "no_defect": 3100,
+    "uncertain_requires_human_review": 3541
+  }
+}

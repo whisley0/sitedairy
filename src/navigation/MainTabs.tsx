@@ -8,6 +8,8 @@ import { EscalationModal } from '../components/EscalationModal';
 import type { AuthRepository, SiteDiaryRepository } from '../data/repositories';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { ProgressScreen } from '../screens/ProgressScreen';
+import { TranscribeScreen } from '../screens/TranscribeScreen';
+import { RiskCaptureScreen } from '../screens/RiskCaptureScreen';
 import {
   ConditionScreen,
   ObservationScreen,
@@ -19,6 +21,8 @@ export type MainTabParamList = {
   Progress: undefined;
   Observations: undefined;
   Conditions: undefined;
+  Transcribe: undefined;
+  Risk: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -47,6 +51,8 @@ export function MainTabs({ authRepository, diaryRepository, onSignOut }: MainTab
                 Progress: 'clipboard',
                 Observations: 'eye',
                 Conditions: 'warning',
+                Transcribe: 'mic',
+                Risk: 'shield-checkmark',
               };
               return <Ionicons name={icons[route.name]} size={size} color={color} />;
             },
@@ -69,6 +75,12 @@ export function MainTabs({ authRepository, diaryRepository, onSignOut }: MainTab
           </Tab.Screen>
           <Tab.Screen name="Conditions">
             {() => <ConditionScreen diaryRepository={diaryRepository} />}
+          </Tab.Screen>
+          <Tab.Screen name="Transcribe">
+            {() => <TranscribeScreen />}
+          </Tab.Screen>
+          <Tab.Screen name="Risk">
+            {() => <RiskCaptureScreen />}
           </Tab.Screen>
         </Tab.Navigator>
 

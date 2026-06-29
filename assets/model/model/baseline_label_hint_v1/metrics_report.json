@@ -1,0 +1,70 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-06-25T05:37:55.176995+00:00",
+  "task_head": "label_hint",
+  "task_mode": "multiclass",
+  "device": "cpu",
+  "train_examples": 34202,
+  "val_examples": 6659,
+  "test_split_used": false,
+  "best_epoch": 1,
+  "best_selection_metric": 0.4035,
+  "selection_metric_name": "accuracy",
+  "checkpoint_path": "C:\\Software\\PythonProject\\fullstackRAG\\FullStack_RAG\\data\\cdv\\training\\runs\\baseline_label_hint_v1\\checkpoint_best.pt",
+  "config_path": "C:\\Software\\PythonProject\\fullstackRAG\\FullStack_RAG\\data\\cdv\\training\\runs\\baseline_label_hint_v1\\training_config.json",
+  "class_distribution_path": "C:\\Software\\PythonProject\\fullstackRAG\\FullStack_RAG\\data\\cdv\\training\\runs\\baseline_label_hint_v1\\class_distribution.json",
+  "history": [
+    {
+      "epoch": 1,
+      "train": {
+        "accuracy": 0.227,
+        "num_examples": 34202,
+        "loss": 0.0107
+      },
+      "val": {
+        "accuracy": 0.4035,
+        "num_examples": 6659,
+        "loss": 0.0079
+      }
+    },
+    {
+      "epoch": 2,
+      "train": {
+        "accuracy": 0.2486,
+        "num_examples": 34202,
+        "loss": 0.01
+      },
+      "val": {
+        "accuracy": 0.1497,
+        "num_examples": 6659,
+        "loss": 0.0104
+      }
+    },
+    {
+      "epoch": 3,
+      "train": {
+        "accuracy": 0.2104,
+        "num_examples": 34202,
+        "loss": 0.0091
+      },
+      "val": {
+        "accuracy": 0.3807,
+        "num_examples": 6659,
+        "loss": 0.0094
+      }
+    },
+    {
+      "epoch": 4,
+      "train": {
+        "accuracy": 0.2608,
+        "num_examples": 34202,
+        "loss": 0.0076
+      },
+      "val": {
+        "accuracy": 0.2675,
+        "num_examples": 6659,
+        "loss": 0.007
+      }
+    }
+  ]
+}
