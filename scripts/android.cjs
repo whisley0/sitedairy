@@ -29,9 +29,19 @@ function portInUse(port) {
   });
 }
 
+async function pickMetroPort() {
+  const preferredPorts = [8081, 8082, 8083, 8084];
+  for (const port of preferredPorts) {
+    if (!(await portInUse(port))) {
+      return port;
+    }
+  }
+  return 8082;
+}
+
 async function main() {
   const userArgs = process.argv.slice(2);
-  const hasPort = userArgs.some((arg, index) => {
+  const hasPort = userArgs.some((arg) => {
     if (arg === '--port') return true;
     if (arg.startsWith('--port=')) return true;
     return false;
@@ -40,15 +50,10 @@ async function main() {
   const expoArgs = ['run:android'];
 
   if (!hasPort) {
-    const preferredPorts = [8081, 8082, 8083, 8084];
-    for (const port of preferredPorts) {
-      if (!(await portInUse(port))) {
-        expoArgs.push('--port', String(port));
-        break;
-      }
-    }
-    if (!expoArgs.includes('--port')) {
-      expoArgs.push('--port', '8082');
+    const port = await pickMetroPort();
+    expoArgs.push('--port', String(port));
+    if (port !== 8081) {
+      console.log(`Metro port 8081 is busy — using ${port} for this run.`);
     }
   }
 
@@ -57,10 +62,7 @@ async function main() {
   const child = spawn(process.execPath, [expoCli, ...expoArgs], {
     cwd: root,
     stdio: 'inherit',
-    env: {
-      ...process.env,
-      CI: '1',
-    },
+    env: process.env,
     shell: process.platform === 'win32',
   });
 
@@ -71,4 +73,3 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-

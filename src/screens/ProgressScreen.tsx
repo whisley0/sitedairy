@@ -1,76 +1,53 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
-  Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { InfoCard, SectionHeader } from '../components/CommonComponents';
+import { useTranslation } from 'react-i18next';
+import { SectionHeader } from '../components/CommonComponents';
 import { TaskCompleteModal } from '../components/TaskCompleteModal';
+import { TaskSection } from '../components/TaskSectionHeader';
+import { TodayTaskCard } from '../components/TodayTaskCard';
 import type { SiteDiaryRepository } from '../data/repositories';
 import type { SiteTask } from '../data/models';
+import { localizeSiteTasks } from '../i18n/localize';
+import { takeTaskConfirmationPhoto } from '../utils/taskPhoto';
+import { taskIsFullyComplete, sortTasksLateFirst } from '../utils/taskProgress';
 import { colors } from '../theme/colors';
 
-function formatStatus(status: SiteTask['status']) {
-  return status.replace('_', ' ');
-}
-
-function TodayTaskCard({ task, onPress }: { task: SiteTask; onPress: () => void }) {
-  const isCompleted = task.status === 'COMPLETED';
-
-  return (
-    <Pressable onPress={onPress} disabled={isCompleted} style={({ pressed }) => [pressed && !isCompleted && styles.pressed]}>
-      <InfoCard
-        title={task.title}
-        subtitle={`Due ${task.dueDate} · ${formatStatus(task.status)}`}
-        style={isCompleted ? styles.completedCard : undefined}
-      >
-        <Text style={styles.description}>{task.description}</Text>
-        {isCompleted ? (
-          <>
-            <View style={styles.doneBadge}>
-              <Ionicons name="checkmark-circle" size={16} color={colors.success} />
-              <Text style={styles.doneText}>Done{task.completedAt ? ` · ${task.completedAt}` : ''}</Text>
-            </View>
-            {task.confirmationPhotoUri ? (
-              <Image source={{ uri: task.confirmationPhotoUri }} style={styles.thumbnail} resizeMode="cover" />
-            ) : null}
-          </>
-        ) : (
-          <Text style={styles.tapHint}>Tap to mark as done and add confirmation photo</Text>
-        )}
-      </InfoCard>
-    </Pressable>
-  );
-}
-
-function FutureTaskCard({ task }: { task: SiteTask }) {
-  return (
-    <InfoCard title={task.title} subtitle={`Due ${task.dueDate} · ${formatStatus(task.status)}`}>
-      <Text style={styles.description}>{task.description}</Text>
-    </InfoCard>
-  );
-}
-
-export function ProgressScreen({ diaryRepository }: { diaryRepository: SiteDiaryRepository }) {
+export function ProgressScreen({
+  diaryRepository,
+  onTaskEscalate,
+}: {
+  diaryRepository: SiteDiaryRepository;
+  onTaskEscalate?: (task: SiteTask) => void;
+}) {
+  const { t, i18n } = useTranslation();
   const [loading, setLoading] = useState(true);
-  const [todayTasks, setTodayTasks] = useState<SiteTask[]>([]);
-  const [futureTasks, setFutureTasks] = useState<SiteTask[]>([]);
+  const [rawTodayTasks, setRawTodayTasks] = useState<SiteTask[]>([]);
+  const [rawTomorrowTasks, setRawTomorrowTasks] = useState<SiteTask[]>([]);
   const [selectedTask, setSelectedTask] = useState<SiteTask | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
+  const todayTasks = useMemo(
+    () => sortTasksLateFirst(localizeSiteTasks(rawTodayTasks, t)),
+    [rawTodayTasks, t, i18n.language],
+  );
+  const tomorrowTasks = useMemo(
+    () => sortTasksLateFirst(localizeSiteTasks(rawTomorrowTasks, t)),
+    [rawTomorrowTasks, t, i18n.language],
+  );
+
   const loadTasks = useCallback(async () => {
     setLoading(true);
-    const [today, future] = await Promise.all([
+    const [today, tomorrow] = await Promise.all([
       diaryRepository.getTodayTasks(),
-      diaryRepository.getFutureTasks(),
+      diaryRepository.getTomorrowTasks(),
     ]);
-    setTodayTasks(today);
-    setFutureTasks(future);
+    setRawTodayTasks(today);
+    setRawTomorrowTasks(tomorrow);
     setLoading(false);
   }, [diaryRepository]);
 
@@ -79,30 +56,46 @@ export function ProgressScreen({ diaryRepository }: { diaryRepository: SiteDiary
   }, [loadTasks]);
 
   const openTask = (task: SiteTask) => {
-    if (task.status === 'COMPLETED') return;
+    if (taskIsFullyComplete(task)) return;
     setSelectedTask(task);
     setModalVisible(true);
   };
 
+  const submitTaskPhoto = async (task: SiteTask) => {
+    const uri = await takeTaskConfirmationPhoto();
+    if (!uri) return;
+    await diaryRepository.addTaskPhoto({ taskId: task.id, uri });
+    await loadTasks();
+  };
+
+  const renderTask = (task: SiteTask) => (
+    <TodayTaskCard
+      key={task.id}
+      task={task}
+      onPress={() => openTask(task)}
+      onPhotoPress={() => submitTaskPhoto(task)}
+      onLongPress={onTaskEscalate ? () => onTaskEscalate(task) : undefined}
+    />
+  );
+
   return (
     <View style={styles.wrapper}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <SectionHeader
-          title="Progress input"
-          description="Today's tasks and upcoming work with deadline tracking"
-        />
+        <SectionHeader title={t('progress.title')} description={t('progress.description')} />
         {loading ? (
-          <ActivityIndicator color={colors.primary} />
+          <ActivityIndicator color={colors.primary} style={styles.loader} />
         ) : (
           <>
-            <Text style={styles.groupTitle}>Today's tasks</Text>
-            {todayTasks.map((task) => (
-              <TodayTaskCard key={task.id} task={task} onPress={() => openTask(task)} />
-            ))}
-            <Text style={styles.groupTitle}>Future tasks</Text>
-            {futureTasks.map((task) => (
-              <FutureTaskCard key={task.id} task={task} />
-            ))}
+            <TaskSection variant="today" count={todayTasks.length}>
+              {todayTasks.map(renderTask)}
+            </TaskSection>
+            <TaskSection
+              variant="future"
+              count={tomorrowTasks.length}
+              emptyMessage={t('progress.futureEmpty')}
+            >
+              {tomorrowTasks.map(renderTask)}
+            </TaskSection>
           </>
         )}
       </ScrollView>
@@ -114,8 +107,8 @@ export function ProgressScreen({ diaryRepository }: { diaryRepository: SiteDiary
           setModalVisible(false);
           setSelectedTask(null);
         }}
-        onComplete={async (taskId, confirmationPhotoUri) => {
-          await diaryRepository.completeTask({ taskId, confirmationPhotoUri });
+        onComplete={async (taskId, payload) => {
+          await diaryRepository.completeTask({ taskId, ...payload });
           await loadTasks();
         }}
       />
@@ -130,43 +123,5 @@ const styles = StyleSheet.create({
   },
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: 16, paddingBottom: 32 },
-  groupTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 8,
-    marginTop: 8,
-  },
-  description: { marginTop: 8, color: colors.text, lineHeight: 22 },
-  tapHint: {
-    marginTop: 10,
-    fontSize: 13,
-    color: colors.primary,
-    fontWeight: '500',
-  },
-  pressed: {
-    opacity: 0.85,
-  },
-  completedCard: {
-    opacity: 0.9,
-    borderColor: colors.success,
-  },
-  doneBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 10,
-  },
-  doneText: {
-    color: colors.success,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  thumbnail: {
-    width: '100%',
-    height: 160,
-    borderRadius: 8,
-    marginTop: 12,
-    backgroundColor: colors.border,
-  },
+  loader: { marginTop: 24 },
 });

@@ -2,19 +2,26 @@
 // pair of GGUF files: the base model + an mmproj vision projector. They are large
 // (~2-4GB total each) so they are fetched at runtime into the app's document dir,
 // mirroring the Nemotron ASR model manager. The user can install all three and
-// pick one in the app to compare their risk assessments.
+// pick one in the app to compare their risk assessments. Includes SmolVLM 500M for fast on-device use.
 import { Directory, File, Paths } from 'expo-file-system';
 
-export type VlmModelId = 'qwen2.5-vl-3b' | 'smolvlm2-2.2b' | 'gemma-3-4b';
+export type VlmModelId =
+  | 'smolvlm-500m'
+  | 'qwen2.5-vl-3b'
+  | 'smolvlm2-2.2b'
+  | 'gemma-3-4b'
+  | 'gemini-nano';
+export type VlmProvider = 'llama' | 'gemini-nano';
 
 export interface VlmModelSpec {
   id: VlmModelId;
   name: string;
+  provider: VlmProvider;
   approxSize: string; // human-readable total (model + mmproj)
-  modelFile: string;
-  mmprojFile: string;
-  modelUrl: string;
-  mmprojUrl: string;
+  modelFile?: string;
+  mmprojFile?: string;
+  modelUrl?: string;
+  mmprojUrl?: string;
 }
 
 const HF = (repo: string, file: string) =>
@@ -22,8 +29,25 @@ const HF = (repo: string, file: string) =>
 
 export const VLM_MODELS: VlmModelSpec[] = [
   {
+    id: 'gemini-nano',
+    name: 'Gemini Nano (AICore)',
+    provider: 'gemini-nano',
+    approxSize: 'Built-in',
+  },
+  {
+    id: 'smolvlm-500m',
+    name: 'SmolVLM 500M',
+    provider: 'llama',
+    approxSize: '~0.55 GB',
+    modelFile: 'SmolVLM-500M-Instruct-Q8_0.gguf',
+    mmprojFile: 'mmproj-SmolVLM-500M-Instruct-Q8_0.gguf',
+    modelUrl: HF('ggml-org/SmolVLM-500M-Instruct-GGUF', 'SmolVLM-500M-Instruct-Q8_0.gguf'),
+    mmprojUrl: HF('ggml-org/SmolVLM-500M-Instruct-GGUF', 'mmproj-SmolVLM-500M-Instruct-Q8_0.gguf'),
+  },
+  {
     id: 'qwen2.5-vl-3b',
     name: 'Qwen2.5-VL 3B',
+    provider: 'llama',
     approxSize: '~3.4 GB',
     modelFile: 'Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf',
     mmprojFile: 'mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf',
@@ -33,6 +57,7 @@ export const VLM_MODELS: VlmModelSpec[] = [
   {
     id: 'smolvlm2-2.2b',
     name: 'SmolVLM2 2.2B',
+    provider: 'llama',
     approxSize: '~2.1 GB',
     modelFile: 'SmolVLM2-2.2B-Instruct-Q4_K_M.gguf',
     mmprojFile: 'mmproj-SmolVLM2-2.2B-Instruct-f16.gguf',
@@ -42,6 +67,7 @@ export const VLM_MODELS: VlmModelSpec[] = [
   {
     id: 'gemma-3-4b',
     name: 'Gemma 3 4B',
+    provider: 'llama',
     approxSize: '~3.4 GB',
     modelFile: 'gemma-3-4b-it-Q4_K_M.gguf',
     mmprojFile: 'mmproj-model-f16.gguf',
@@ -54,6 +80,10 @@ export function getModelSpec(id: VlmModelId): VlmModelSpec {
   const spec = VLM_MODELS.find((m) => m.id === id);
   if (!spec) throw new Error(`Unknown VLM model id: ${id}`);
   return spec;
+}
+
+export function isVlmModelId(id: string | undefined): id is VlmModelId {
+  return Boolean(id && VLM_MODELS.some((m) => m.id === id));
 }
 
 export interface DownloadProgressInfo {
@@ -74,6 +104,9 @@ function fileRef(id: VlmModelId, name: string): File {
 // llama.rn normalizes file:// itself, so the raw URI is fine to hand to initLlama.
 export function modelPaths(id: VlmModelId): { modelPath: string; mmprojPath: string } {
   const spec = getModelSpec(id);
+  if (spec.provider !== 'llama' || !spec.modelFile || !spec.mmprojFile) {
+    throw new Error(`Model ${id} does not use local GGUF files`);
+  }
   return {
     modelPath: fileRef(id, spec.modelFile).uri,
     mmprojPath: fileRef(id, spec.mmprojFile).uri,
@@ -82,6 +115,9 @@ export function modelPaths(id: VlmModelId): { modelPath: string; mmprojPath: str
 
 export function isModelDownloaded(id: VlmModelId): boolean {
   const spec = getModelSpec(id);
+  if (spec.provider !== 'llama' || !spec.modelFile || !spec.mmprojFile) {
+    return true;
+  }
   return fileRef(id, spec.modelFile).exists && fileRef(id, spec.mmprojFile).exists;
 }
 
@@ -90,6 +126,10 @@ export async function downloadModel(
   onProgress?: (info: DownloadProgressInfo) => void,
 ): Promise<void> {
   const spec = getModelSpec(id);
+  if (spec.provider !== 'llama' || !spec.modelFile || !spec.mmprojFile || !spec.modelUrl || !spec.mmprojUrl) {
+    onProgress?.({ file: spec.name, index: 1, total: 1, fileFraction: 1 });
+    return;
+  }
   const dir = modelDir(id);
   if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
 
@@ -120,6 +160,20 @@ export async function downloadModel(
 }
 
 export function deleteModel(id: VlmModelId): void {
+  const spec = getModelSpec(id);
+  if (spec.provider !== 'llama') return;
   const dir = modelDir(id);
   if (dir.exists) dir.delete();
+}
+
+const VLM_PREFERENCE_ORDER: VlmModelId[] = [
+  'gemini-nano',
+  'smolvlm-500m',
+  'smolvlm2-2.2b',
+  'qwen2.5-vl-3b',
+  'gemma-3-4b',
+];
+
+export function preferredDownloadedVlmModel(): VlmModelId {
+  return VLM_PREFERENCE_ORDER.find((id) => isModelDownloaded(id)) ?? VLM_MODELS[0].id;
 }

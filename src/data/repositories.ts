@@ -1,4 +1,5 @@
 import type {
+  AddTaskPhotoInput,
   CompleteTaskInput,
   DummyUser,
   EmergencyEscalation,
@@ -7,8 +8,13 @@ import type {
   SiteConditionIssue,
   SiteObservation,
   SiteTask,
+  SubmitEscalationInput,
+  TaskCompletionRecord,
+  TaskPhoto,
 } from './models';
 import * as mock from './mockData';
+import { taskDurationDays, taskIsFullyComplete } from '../utils/taskProgress';
+import { recomputeTaskWorkTimes } from '../utils/taskWork';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -21,7 +27,8 @@ export interface AuthRepository {
 
 export interface SiteDiaryRepository {
   getTodayTasks(): Promise<SiteTask[]>;
-  getFutureTasks(): Promise<SiteTask[]>;
+  getTomorrowTasks(): Promise<SiteTask[]>;
+  addTaskPhoto(input: AddTaskPhotoInput): Promise<SiteTask>;
   completeTask(input: CompleteTaskInput): Promise<SiteTask>;
   getDeadlineReminders(): Promise<SiteTask[]>;
   getObservations(): Promise<SiteObservation[]>;
@@ -29,7 +36,8 @@ export interface SiteDiaryRepository {
   getConditionIssues(): Promise<SiteConditionIssue[]>;
   submitConditionIssue(input: NewConditionInput): Promise<SiteConditionIssue>;
   getEscalations(): Promise<EmergencyEscalation[]>;
-  submitEscalation(title: string, description: string): Promise<EmergencyEscalation>;
+  submitEscalation(input: SubmitEscalationInput): Promise<EmergencyEscalation>;
+  resolveEscalation(escalationId: string): Promise<EmergencyEscalation>;
 }
 
 /** Dummy auth — simulates Firebase Email/Password without network calls. */
@@ -78,10 +86,10 @@ export class DummySiteDiaryRepository implements SiteDiaryRepository {
   private observationList = [...mock.observations];
   private conditionList = [...mock.conditionIssues];
   private todayTaskList = [...mock.todayTasks];
-  private futureTaskList = [...mock.futureTasks];
+  private tomorrowTaskList = [...mock.tomorrowTasks];
 
   private allTasks(): SiteTask[] {
-    return [...this.todayTaskList, ...this.futureTaskList];
+    return [...this.todayTaskList, ...this.tomorrowTaskList];
   }
 
   async getTodayTasks(): Promise<SiteTask[]> {
@@ -89,23 +97,111 @@ export class DummySiteDiaryRepository implements SiteDiaryRepository {
     return [...this.todayTaskList];
   }
 
-  async getFutureTasks(): Promise<SiteTask[]> {
+  async getTomorrowTasks(): Promise<SiteTask[]> {
     await delay(300);
-    return [...this.futureTaskList];
+    return [...this.tomorrowTaskList];
+  }
+
+  private findTask(taskId: string): SiteTask | undefined {
+    return (
+      this.todayTaskList.find((item) => item.id === taskId) ??
+      this.tomorrowTaskList.find((item) => item.id === taskId)
+    );
+  }
+
+  private applyTaskWorkUpdate(
+    task: SiteTask,
+    input: Pick<
+      CompleteTaskInput,
+      | 'newPhotos'
+      | 'removePhotoIds'
+      | 'workStartedAt'
+      | 'workEndedAt'
+      | 'workStartedAtManual'
+      | 'workEndedAtManual'
+    >,
+  ): void {
+    let photos = [...(task.photos ?? [])];
+
+    if (input.removePhotoIds?.length) {
+      const remove = new Set(input.removePhotoIds);
+      photos = photos.filter((photo) => !remove.has(photo.id));
+    }
+
+    if (input.newPhotos?.length) {
+      const appended: TaskPhoto[] = input.newPhotos.map((photo, index) => ({
+        id: `photo-${task.id}-${Date.now()}-${index}`,
+        uri: photo.uri,
+        uploadedAt: photo.uploadedAt ?? new Date().toISOString(),
+      }));
+      photos = [...photos, ...appended];
+    }
+
+    task.photos = photos;
+
+    if (input.workStartedAtManual !== undefined) {
+      task.workStartedAtManual = input.workStartedAtManual;
+    }
+    if (input.workEndedAtManual !== undefined) {
+      task.workEndedAtManual = input.workEndedAtManual;
+    }
+    if (input.workStartedAt !== undefined) {
+      task.workStartedAt = input.workStartedAt;
+    }
+    if (input.workEndedAt !== undefined) {
+      task.workEndedAt = input.workEndedAt;
+    }
+
+    recomputeTaskWorkTimes(task);
+  }
+
+  async addTaskPhoto(input: AddTaskPhotoInput): Promise<SiteTask> {
+    await delay(300);
+    const task = this.findTask(input.taskId);
+    if (!task) {
+      throw new Error('Task not found.');
+    }
+
+    this.applyTaskWorkUpdate(task, {
+      newPhotos: [{ uri: input.uri, uploadedAt: input.uploadedAt }],
+    });
+
+    if (task.status === 'NOT_STARTED') {
+      task.status = 'IN_PROGRESS';
+    }
+
+    return { ...task };
   }
 
   async completeTask(input: CompleteTaskInput): Promise<SiteTask> {
     await delay(400);
-    const task = this.todayTaskList.find((item) => item.id === input.taskId);
+    const task = this.findTask(input.taskId);
     if (!task) {
       throw new Error('Task not found.');
     }
-    if (task.status === 'COMPLETED') {
+    if (taskIsFullyComplete(task)) {
       throw new Error('Task is already completed.');
     }
-    task.status = 'COMPLETED';
-    task.confirmationPhotoUri = input.confirmationPhotoUri;
-    task.completedAt = new Date().toISOString().slice(0, 10);
+
+    this.applyTaskWorkUpdate(task, input);
+
+    const completedAt = new Date().toISOString().slice(0, 10);
+    const latestPhoto = task.photos?.[task.photos.length - 1];
+    const record: TaskCompletionRecord = {
+      id: `completion-${task.id}-${Date.now()}`,
+      completedAt,
+      confirmationPhotoUri: latestPhoto?.uri,
+    };
+    task.completionRecords = [...(task.completionRecords ?? []), record];
+
+    const required = taskDurationDays(task);
+    if (task.completionRecords.length >= required) {
+      task.status = 'COMPLETED';
+      task.completedAt = completedAt;
+    } else if (task.status === 'NOT_STARTED') {
+      task.status = 'IN_PROGRESS';
+    }
+
     return { ...task };
   }
 
@@ -115,7 +211,7 @@ export class DummySiteDiaryRepository implements SiteDiaryRepository {
     deadline.setDate(deadline.getDate() + 3);
     const deadlineStr = deadline.toISOString().slice(0, 10);
     return this.allTasks()
-      .filter((task) => task.status !== 'COMPLETED' && task.dueDate <= deadlineStr)
+      .filter((task) => !taskIsFullyComplete(task) && task.dueDate <= deadlineStr)
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   }
 
@@ -163,17 +259,30 @@ export class DummySiteDiaryRepository implements SiteDiaryRepository {
     return [...this.escalationList];
   }
 
-  async submitEscalation(title: string, description: string): Promise<EmergencyEscalation> {
+  async submitEscalation(input: SubmitEscalationInput): Promise<EmergencyEscalation> {
     await delay(500);
     const escalation: EmergencyEscalation = {
       id: `esc-${Date.now()}`,
-      title,
-      description,
+      title: input.title,
+      description: input.description,
       status: 'OPEN',
       escalatedAt: new Date().toISOString().slice(0, 10),
       targetTeam: 'Upper Management',
+      taskId: input.taskId,
+      taskTitle: input.taskTitle,
+      photoUri: input.photoUri,
     };
     this.escalationList.unshift(escalation);
     return escalation;
+  }
+
+  async resolveEscalation(escalationId: string): Promise<EmergencyEscalation> {
+    await delay(300);
+    const escalation = this.escalationList.find((item) => item.id === escalationId);
+    if (!escalation) {
+      throw new Error('Escalation not found.');
+    }
+    escalation.status = 'RESOLVED';
+    return { ...escalation };
   }
 }

@@ -1,119 +1,188 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text } from 'react-native';
-import { InfoCard, SectionHeader, Chip } from '../components/CommonComponents';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
+  View,
+} from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { useTranslation } from 'react-i18next';
+import { EscalationCard } from '../components/EscalationCard';
+import { EscalationDetailModal } from '../components/EscalationDetailModal';
+import { SectionHeader } from '../components/CommonComponents';
+import { TaskCompleteModal } from '../components/TaskCompleteModal';
+import { TodayTaskCard } from '../components/TodayTaskCard';
 import type { AuthRepository, SiteDiaryRepository } from '../data/repositories';
-import type { SiteTask } from '../data/models';
+import type { EmergencyEscalation, SiteTask } from '../data/models';
+import { localizeEscalations, localizeSiteTasks } from '../i18n/localize';
+import { takeTaskConfirmationPhoto } from '../utils/taskPhoto';
+import { taskIsFullyComplete, taskIsLate, sortTasksLateFirst } from '../utils/taskProgress';
 import { colors } from '../theme/colors';
 
 interface DashboardScreenProps {
   authRepository: AuthRepository;
   diaryRepository: SiteDiaryRepository;
-  onSignOut: () => void;
+  onTaskEscalate?: (task: SiteTask) => void;
+  escalationRefreshSignal?: number;
 }
+
+type DashboardRow =
+  | { key: string; type: 'escalation'; data: EmergencyEscalation }
+  | { key: string; type: 'task'; data: SiteTask };
 
 export function DashboardScreen({
   authRepository,
   diaryRepository,
-  onSignOut,
+  onTaskEscalate,
+  escalationRefreshSignal = 0,
 }: DashboardScreenProps) {
+  const { t, i18n } = useTranslation();
   const [loading, setLoading] = useState(true);
-  const [reminders, setReminders] = useState<SiteTask[]>([]);
-  const [openIssues, setOpenIssues] = useState(0);
-  const [openEscalations, setOpenEscalations] = useState(0);
+  const [rawTodayTasks, setRawTodayTasks] = useState<SiteTask[]>([]);
+  const [rawEscalations, setRawEscalations] = useState<EmergencyEscalation[]>([]);
+  const [selectedTask, setSelectedTask] = useState<SiteTask | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedEscalation, setSelectedEscalation] = useState<EmergencyEscalation | null>(null);
+  const [escalationDetailVisible, setEscalationDetailVisible] = useState(false);
   const user = authRepository.currentUser();
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const [deadlines, issues, escalations] = await Promise.all([
-        diaryRepository.getDeadlineReminders(),
-        diaryRepository.getConditionIssues(),
-        diaryRepository.getEscalations(),
-      ]);
-      setReminders(deadlines);
-      setOpenIssues(issues.filter((i) => !i.resolved).length);
-      setOpenEscalations(escalations.filter((e) => e.status !== 'RESOLVED').length);
-      setLoading(false);
-    })();
+  const todayTasks = useMemo(
+    () => sortTasksLateFirst(localizeSiteTasks(rawTodayTasks, t)),
+    [rawTodayTasks, t, i18n.language],
+  );
+  const activeEscalations = useMemo(
+    () => localizeEscalations(rawEscalations.filter((e) => e.status !== 'RESOLVED'), t),
+    [rawEscalations, t, i18n.language],
+  );
+
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    const [tasks, escalations] = await Promise.all([
+      diaryRepository.getTodayTasks(),
+      diaryRepository.getEscalations(),
+    ]);
+    setRawTodayTasks(tasks);
+    setRawEscalations(escalations);
+    setLoading(false);
   }, [diaryRepository]);
 
-  const handleSignOut = async () => {
-    await authRepository.signOut();
-    onSignOut();
+  useFocusEffect(
+    useCallback(() => {
+      void loadDashboard();
+    }, [loadDashboard]),
+  );
+
+  useEffect(() => {
+    if (escalationRefreshSignal > 0) {
+      void loadDashboard();
+    }
+  }, [escalationRefreshSignal, loadDashboard]);
+
+  const rows = useMemo<DashboardRow[]>(() => {
+    const lateTasks = todayTasks.filter((task) => taskIsLate(task));
+    const otherTasks = todayTasks.filter((task) => !taskIsLate(task));
+    return [
+      ...activeEscalations.map((escalation) => ({
+        key: escalation.id,
+        type: 'escalation' as const,
+        data: escalation,
+      })),
+      ...lateTasks.map((task) => ({
+        key: task.id,
+        type: 'task' as const,
+        data: task,
+      })),
+      ...otherTasks.map((task) => ({
+        key: task.id,
+        type: 'task' as const,
+        data: task,
+      })),
+    ];
+  }, [activeEscalations, todayTasks]);
+
+  const openTask = (task: SiteTask) => {
+    if (taskIsFullyComplete(task)) return;
+    setSelectedTask(task);
+    setModalVisible(true);
   };
 
-  const handlePrintDiary = () => {
-    const email = user?.email ?? 'your email';
-    Alert.alert(
-      'Site diary sent',
-      `Today's consolidated site diary has been sent to ${email}.`,
-    );
+  const openEscalation = (escalation: EmergencyEscalation) => {
+    setSelectedEscalation(escalation);
+    setEscalationDetailVisible(true);
   };
+
+  const submitTaskPhoto = async (task: SiteTask) => {
+    const uri = await takeTaskConfirmationPhoto();
+    if (!uri) return;
+    await diaryRepository.addTaskPhoto({ taskId: task.id, uri });
+    await loadDashboard();
+  };
+
+  const listHeader = (
+    <View>
+      <SectionHeader
+        title={t('dashboard.welcome', { name: user?.displayName ?? t('common.supervisor') })}
+        description={t('dashboard.description')}
+      />
+      {loading ? <ActivityIndicator color={colors.primary} style={styles.loader} /> : null}
+    </View>
+  );
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <SectionHeader
-        title={`Welcome, ${user?.displayName ?? 'Supervisor'}`}
-        description="Site diary overview — dummy data preview"
+    <View style={styles.wrapper}>
+      <FlatList
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        data={loading ? [] : rows}
+        keyExtractor={(item) => item.key}
+        renderItem={({ item }) =>
+          item.type === 'escalation' ? (
+            <EscalationCard escalation={item.data} onPress={() => openEscalation(item.data)} />
+          ) : (
+            <TodayTaskCard
+              task={item.data}
+              onPress={() => openTask(item.data)}
+              onPhotoPress={() => submitTaskPhoto(item.data)}
+              onLongPress={onTaskEscalate ? () => onTaskEscalate(item.data) : undefined}
+            />
+          )
+        }
+        ListHeaderComponent={listHeader}
+        showsVerticalScrollIndicator
       />
-      {loading ? (
-        <ActivityIndicator color={colors.primary} style={styles.loader} />
-      ) : (
-        <>
-          <InfoCard title="Deadline reminders" subtitle="Tasks due within the next 3 days">
-            {reminders.length === 0 ? (
-              <Text style={styles.body}>No upcoming deadlines.</Text>
-            ) : (
-              reminders.map((task) => (
-                <Text key={task.id} style={styles.body}>
-                  • {task.title} — due {task.dueDate}
-                </Text>
-              ))
-            )}
-          </InfoCard>
-          <InfoCard title="Open condition issues" subtitle="Safety & quality items needing attention">
-            <Text style={styles.stat}>{openIssues} open issue(s)</Text>
-          </InfoCard>
-          <InfoCard title="Active escalations" subtitle="Emergency channels to upper management">
-            <Text style={styles.stat}>{openEscalations} active escalation(s)</Text>
-          </InfoCard>
-          <InfoCard title="Premium features preview" subtitle="Site observations can be marked billable">
-            <Chip label="Billable observations — coming soon" />
-          </InfoCard>
-          <Pressable style={styles.printButton} onPress={handlePrintDiary}>
-            <Text style={styles.printButtonText}>Print consolidated site diary</Text>
-          </Pressable>
-          <Pressable style={styles.signOutButton} onPress={handleSignOut}>
-            <Text style={styles.signOutText}>Sign out</Text>
-          </Pressable>
-        </>
-      )}
-    </ScrollView>
+
+      <EscalationDetailModal
+        visible={escalationDetailVisible}
+        escalation={selectedEscalation}
+        onClose={() => {
+          setEscalationDetailVisible(false);
+          setSelectedEscalation(null);
+        }}
+        onResolve={async (escalationId) => {
+          await diaryRepository.resolveEscalation(escalationId);
+          await loadDashboard();
+        }}
+      />
+
+      <TaskCompleteModal
+        visible={modalVisible}
+        task={selectedTask}
+        onClose={() => {
+          setModalVisible(false);
+          setSelectedTask(null);
+        }}
+        onComplete={async (taskId, payload) => {
+          await diaryRepository.completeTask({ taskId, ...payload });
+          await loadDashboard();
+        }}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  wrapper: { flex: 1, backgroundColor: colors.background },
   container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: 16, paddingBottom: 32 },
-  loader: { marginTop: 24 },
-  body: { marginTop: 8, color: colors.text, lineHeight: 22 },
-  stat: { marginTop: 8, fontSize: 24, fontWeight: '700', color: colors.text },
-  printButton: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  printButtonText: { color: colors.primary, fontWeight: '600', fontSize: 16 },
-  signOutButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  signOutText: { color: '#fff', fontWeight: '600', fontSize: 16 },
+  content: { paddingHorizontal: 16, paddingBottom: 32 },
+  loader: { marginVertical: 16 },
 });

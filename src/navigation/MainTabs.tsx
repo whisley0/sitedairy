@@ -1,28 +1,34 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import {
+  createBottomTabNavigator,
+  type BottomTabBarProps,
+} from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EscalationModal } from '../components/EscalationModal';
 import type { AuthRepository, SiteDiaryRepository } from '../data/repositories';
+import type { SiteTask } from '../data/models';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { ProgressScreen } from '../screens/ProgressScreen';
-import { TranscribeScreen } from '../screens/TranscribeScreen';
-import { RiskCaptureScreen } from '../screens/RiskCaptureScreen';
-import {
-  ConditionScreen,
-  ObservationScreen,
-} from '../screens/ObservationAndConditionScreens';
+import { SettingsScreen } from '../screens/SettingsScreen';
+import { SiteDiaryStack } from './AssessmentsStack';
 import { colors } from '../theme/colors';
 
 export type MainTabParamList = {
   Home: undefined;
   Progress: undefined;
-  Observations: undefined;
-  Conditions: undefined;
-  Transcribe: undefined;
-  Risk: undefined;
+  SiteDiary: undefined;
+  Settings: undefined;
+};
+
+const TAB_LABEL_KEYS: Record<keyof MainTabParamList, string> = {
+  Home: 'tabs.home',
+  Progress: 'tabs.progress',
+  SiteDiary: 'tabs.siteDiary',
+  Settings: 'tabs.settings',
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -30,12 +36,87 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 interface MainTabsProps {
   authRepository: AuthRepository;
   diaryRepository: SiteDiaryRepository;
-  onSignOut: () => void;
 }
 
-export function MainTabs({ authRepository, diaryRepository, onSignOut }: MainTabsProps) {
+function CustomTabBar({
+  state,
+  descriptors,
+  navigation,
+  onEmergency,
+}: BottomTabBarProps & { onEmergency: () => void }) {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
+  const leftRoutes = state.routes.slice(0, 2);
+  const rightRoutes = state.routes.slice(2);
+
+  const renderTab = (route: (typeof state.routes)[number], index: number) => {
+    const { options } = descriptors[route.key];
+    const isFocused = state.index === index;
+    const color = isFocused ? colors.primary : colors.textMuted;
+    const label = options.title ?? t(TAB_LABEL_KEYS[route.name as keyof MainTabParamList]);
+
+    return (
+      <Pressable
+        key={route.key}
+        style={styles.tabItem}
+        onPress={() => navigation.navigate(route.name)}
+        accessibilityRole="button"
+        accessibilityState={isFocused ? { selected: true } : {}}
+        accessibilityLabel={label}
+      >
+        {options.tabBarIcon?.({ focused: isFocused, color, size: 24 })}
+        <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
+          {label}
+        </Text>
+      </Pressable>
+    );
+  };
+
+  return (
+    <View style={[styles.tabBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+      <View style={styles.tabRow}>
+        {leftRoutes.map((route, index) => renderTab(route, index))}
+        <View style={styles.emergencySlot}>
+          <Pressable
+            style={styles.emergencyPressable}
+            onPress={onEmergency}
+            accessibilityRole="button"
+            accessibilityLabel={t('tabs.emergencyA11y')}
+          >
+            <View style={styles.emergencyRing}>
+              <View style={styles.emergencyButton}>
+                <Ionicons name="alert" size={28} color="#fff" />
+                <Text style={styles.emergencyText}>{t('tabs.emergency')}</Text>
+              </View>
+            </View>
+          </Pressable>
+        </View>
+        {rightRoutes.map((route, index) => renderTab(route, index + 2))}
+      </View>
+    </View>
+  );
+}
+
+export function MainTabs({ authRepository, diaryRepository }: MainTabsProps) {
+  const { t } = useTranslation();
   const [escalationVisible, setEscalationVisible] = useState(false);
+  const [linkedTask, setLinkedTask] = useState<SiteTask | null>(null);
+  const [escalationRefreshSignal, setEscalationRefreshSignal] = useState(0);
+
+  const openEscalation = () => {
+    setLinkedTask(null);
+    setEscalationVisible(true);
+  };
+
+  const openTaskEscalation = (task: SiteTask) => {
+    setLinkedTask(task);
+    setEscalationVisible(true);
+  };
+
+  const closeEscalation = () => {
+    setEscalationVisible(false);
+    setLinkedTask(null);
+  };
 
   return (
     <NavigationContainer>
@@ -49,54 +130,48 @@ export function MainTabs({ authRepository, diaryRepository, onSignOut }: MainTab
               const icons: Record<keyof MainTabParamList, keyof typeof Ionicons.glyphMap> = {
                 Home: 'home',
                 Progress: 'clipboard',
-                Observations: 'eye',
-                Conditions: 'warning',
-                Transcribe: 'mic',
-                Risk: 'shield-checkmark',
+                SiteDiary: 'camera',
+                Settings: 'settings-outline',
               };
               return <Ionicons name={icons[route.name]} size={size} color={color} />;
             },
           })}
+          tabBar={(props) => (
+            <CustomTabBar {...props} onEmergency={openEscalation} />
+          )}
         >
-          <Tab.Screen name="Home">
+          <Tab.Screen name="Home" options={{ title: t('tabs.home') }}>
             {() => (
               <DashboardScreen
                 authRepository={authRepository}
                 diaryRepository={diaryRepository}
-                onSignOut={onSignOut}
+                onTaskEscalate={openTaskEscalation}
+                escalationRefreshSignal={escalationRefreshSignal}
               />
             )}
           </Tab.Screen>
-          <Tab.Screen name="Progress">
-            {() => <ProgressScreen diaryRepository={diaryRepository} />}
+          <Tab.Screen name="Progress" options={{ title: t('tabs.progress') }}>
+            {() => (
+              <ProgressScreen
+                diaryRepository={diaryRepository}
+                onTaskEscalate={openTaskEscalation}
+              />
+            )}
           </Tab.Screen>
-          <Tab.Screen name="Observations">
-            {() => <ObservationScreen diaryRepository={diaryRepository} />}
+          <Tab.Screen name="SiteDiary" options={{ title: t('tabs.siteDiary') }}>
+            {() => <SiteDiaryStack />}
           </Tab.Screen>
-          <Tab.Screen name="Conditions">
-            {() => <ConditionScreen diaryRepository={diaryRepository} />}
-          </Tab.Screen>
-          <Tab.Screen name="Transcribe">
-            {() => <TranscribeScreen />}
-          </Tab.Screen>
-          <Tab.Screen name="Risk">
-            {() => <RiskCaptureScreen />}
+          <Tab.Screen name="Settings" options={{ title: t('tabs.settings') }}>
+            {() => <SettingsScreen />}
           </Tab.Screen>
         </Tab.Navigator>
 
-        <Pressable
-          style={[styles.alertButton, { top: insets.top + 8 }]}
-          onPress={() => setEscalationVisible(true)}
-          accessibilityLabel="Emergency escalation"
-          hitSlop={8}
-        >
-          <Ionicons name="alert-circle" size={30} color={colors.error} />
-        </Pressable>
-
         <EscalationModal
           visible={escalationVisible}
-          onClose={() => setEscalationVisible(false)}
+          onClose={closeEscalation}
           diaryRepository={diaryRepository}
+          linkedTask={linkedTask}
+          onSubmitted={() => setEscalationRefreshSignal((signal) => signal + 1)}
         />
       </View>
     </NavigationContainer>
@@ -106,18 +181,66 @@ export function MainTabs({ authRepository, diaryRepository, onSignOut }: MainTab
 const styles = StyleSheet.create({
   shell: {
     flex: 1,
+    backgroundColor: colors.background,
   },
-  alertButton: {
-    position: 'absolute',
-    right: 16,
-    zIndex: 100,
+  tabBar: {
     backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 4,
-    elevation: 4,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: 8,
+  },
+  tabRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+    gap: 2,
+  },
+  tabLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  emergencySlot: {
+    flex: 1,
+    alignItems: 'center',
+    marginTop: -36,
+  },
+  emergencyPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emergencyRing: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.28,
+    shadowRadius: 5,
+  },
+  emergencyButton: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: colors.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  emergencyText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+    marginTop: 2,
+    textAlign: 'center',
+    letterSpacing: 0.2,
   },
 });

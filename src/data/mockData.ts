@@ -29,9 +29,16 @@ export const todayTasks: SiteTask[] = [
     id: 'task-1',
     title: 'Pour Level 3 slab',
     description: 'Coordinate with concrete supplier for morning pour.',
-    dueDate: formatDate(today),
+    dueDate: formatDate(addDays(today, 2)),
     status: 'IN_PROGRESS',
     isToday: true,
+    durationDays: 3,
+    completionRecords: [
+      {
+        id: 'completion-task-1-1',
+        completedAt: formatDate(addDays(today, -1)),
+      },
+    ],
   },
   {
     id: 'task-2',
@@ -40,33 +47,41 @@ export const todayTasks: SiteTask[] = [
     dueDate: formatDate(today),
     status: 'NOT_STARTED',
     isToday: true,
+    durationDays: 1,
+    completionRecords: [],
+  },
+  {
+    id: 'task-5',
+    title: 'Close out waterproofing inspection',
+    description: 'Sign off basement membrane works before backfill — overdue since last week.',
+    dueDate: formatDate(addDays(today, -5)),
+    status: 'IN_PROGRESS',
+    isToday: true,
+    durationDays: 1,
+    completionRecords: [],
   },
 ];
 
-export const futureTasks: SiteTask[] = [
+export const tomorrowTasks: SiteTask[] = [
   {
     id: 'task-3',
     title: 'Install MEP rough-in',
     description: 'Mechanical and electrical rough-in for east wing.',
-    dueDate: formatDate(addDays(today, 2)),
+    dueDate: formatDate(addDays(today, 1)),
     status: 'NOT_STARTED',
     isToday: false,
+    durationDays: 3,
+    completionRecords: [],
   },
   {
     id: 'task-4',
     title: 'Submit weekly progress report',
     description: 'Compile photos and labour hours for client.',
-    dueDate: formatDate(addDays(today, 4)),
+    dueDate: formatDate(addDays(today, 1)),
     status: 'NOT_STARTED',
     isToday: false,
-  },
-  {
-    id: 'task-5',
-    title: 'Facade panel delivery check',
-    description: 'Confirm delivery slot with logistics team.',
-    dueDate: formatDate(addDays(today, 7)),
-    status: 'NOT_STARTED',
-    isToday: false,
+    durationDays: 1,
+    completionRecords: [],
   },
 ];
 
@@ -121,7 +136,7 @@ export const escalations: EmergencyEscalation[] = [
 
 export function upcomingDeadlineReminders(daysAhead = 3): SiteTask[] {
   const deadline = addDays(today, daysAhead);
-  return [...todayTasks, ...futureTasks]
+  return [...todayTasks, ...tomorrowTasks]
     .filter((task) => task.status !== 'COMPLETED' && new Date(task.dueDate) <= deadline)
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 }

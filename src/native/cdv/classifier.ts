@@ -90,4 +90,13 @@ export class Classifier {
     }
     return out;
   }
+
+  async release(): Promise<void> {
+    for (const head of HEADS) {
+      const session = this.sessions[head] as InferenceSession & { release?: () => Promise<void> };
+      if (typeof session.release === 'function') {
+        await session.release();
+      }
+    }
+  }
 }
