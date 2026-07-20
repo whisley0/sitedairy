@@ -3,6 +3,7 @@
 // ported from parakeet-rs (src/nemotron.rs, src/model_nemotron.rs). Tensor names
 // and shapes match the ONNX export exactly.
 import { InferenceSession, Tensor } from 'onnxruntime-react-native';
+import { ASR_PRIMARY_LANGUAGE } from './asrConfig';
 import { Tokenizer } from './tokenizer';
 import { computeLogMel, createMelFilterbank, N_MELS } from './melSpectrogram';
 
@@ -20,7 +21,8 @@ const LSTM_LAYERS = 2;
 const PROMPT_DICTIONARY: Record<string, number> = {
   auto: 101, en: 0, 'en-US': 0, 'en-GB': 1, es: 3, 'es-ES': 2, fr: 8, 'fr-FR': 8,
   de: 9, 'de-DE': 9, it: 15, pt: 13, 'pt-BR': 12, nl: 16, ru: 11, ar: 7, hi: 6,
-  ja: 10, 'ja-JP': 10, ko: 14, 'ko-KR': 14, 'zh-CN': 4, vi: 33, uk: 19, pl: 17,
+  ja: 10, 'ja-JP': 10, ko: 14, 'ko-KR': 14, 'zh-CN': 4, 'zh-TW': 5, 'zh-HK': 5, yue: 5,
+  cantonese: 5, vi: 33, uk: 19, pl: 17,
   tr: 18, sv: 24, cs: 22, da: 25, fi: 26, ro: 20, hu: 23,
 };
 
@@ -49,13 +51,13 @@ export class Nemotron {
     private allowedMask: Uint8Array,
   ) {}
 
-  promptIndex = 101; // default "auto" for multilingual
+  promptIndex = PROMPT_DICTIONARY[ASR_PRIMARY_LANGUAGE] ?? 101;
 
   static async create(
     encoderPath: string,
     decoderPath: string,
     tokenizerBytes: Uint8Array,
-    targetLang?: string,
+    targetLang: string = ASR_PRIMARY_LANGUAGE,
   ): Promise<Nemotron> {
     const tokenizer = Tokenizer.fromBytes(tokenizerBytes);
     const encoder = await InferenceSession.create(encoderPath);

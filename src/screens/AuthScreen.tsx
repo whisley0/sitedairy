@@ -4,7 +4,6 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -12,8 +11,12 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { AuthRepository } from '../data/repositories';
+import { HapticPressable } from '../components/HapticPressable';
 import { SectionHeader } from '../components/CommonComponents';
+import { AuthScreen as CompleteAuthScreen } from './complete/AuthScreen';
 import { colors } from '../theme/colors';
+import { typography } from '../theme/typography';
+import { useUiMode } from '../ui/UiModeProvider';
 
 const gammonLogo = require('../../assets/logo-gammon-480x480-2021.webp');
 
@@ -22,7 +25,13 @@ interface AuthScreenProps {
   onAuthenticated: () => void;
 }
 
-export function AuthScreen({ authRepository, onAuthenticated }: AuthScreenProps) {
+export function AuthScreen(props: AuthScreenProps) {
+  const { isSimplified } = useUiMode();
+  if (!isSimplified) return <CompleteAuthScreen {...props} />;
+  return <AuthScreenSimplified {...props} />;
+}
+
+function AuthScreenSimplified({ authRepository, onAuthenticated }: AuthScreenProps) {
   const { t } = useTranslation();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -53,7 +62,7 @@ export function AuthScreen({ authRepository, onAuthenticated }: AuthScreenProps)
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <SectionHeader title={t('auth.title')} description={t('auth.tagline')} />
+      <SectionHeader title={t('auth.title')} />
       <View style={styles.inner}>
         <Image
           source={gammonLogo}
@@ -61,7 +70,6 @@ export function AuthScreen({ authRepository, onAuthenticated }: AuthScreenProps)
           resizeMode="contain"
           accessibilityLabel={t('auth.logoA11y')}
         />
-        <Text style={styles.hint}>{t('auth.hint')}</Text>
 
         {isSignUp ? (
           <TextInput
@@ -91,7 +99,7 @@ export function AuthScreen({ authRepository, onAuthenticated }: AuthScreenProps)
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <Pressable style={styles.button} onPress={handleSubmit} disabled={loading}>
+        <HapticPressable style={styles.button} onPress={handleSubmit} disabled={loading}>
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
@@ -99,9 +107,9 @@ export function AuthScreen({ authRepository, onAuthenticated }: AuthScreenProps)
               {isSignUp ? t('auth.createAccount') : t('auth.signIn')}
             </Text>
           )}
-        </Pressable>
+        </HapticPressable>
 
-        <Pressable
+        <HapticPressable
           onPress={() => {
             setIsSignUp(!isSignUp);
             setError(null);
@@ -110,7 +118,7 @@ export function AuthScreen({ authRepository, onAuthenticated }: AuthScreenProps)
           <Text style={styles.link}>
             {isSignUp ? t('auth.alreadyHaveAccount') : t('auth.needAccount')}
           </Text>
-        </Pressable>
+        </HapticPressable>
       </View>
     </KeyboardAvoidingView>
   );
@@ -124,31 +132,13 @@ const styles = StyleSheet.create({
   inner: {
     flex: 1,
     justifyContent: 'center',
-    padding: 24,
+    padding: 28,
     paddingRight: 72,
   },
   logoImage: {
-    width: 120,
-    height: 120,
+    width: 132,
+    height: 132,
     alignSelf: 'center',
-    marginBottom: 16,
-  },
-  logo: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: colors.primary,
-    textAlign: 'center',
-  },
-  tagline: {
-    textAlign: 'center',
-    color: colors.textMuted,
-    marginTop: 8,
-  },
-  hint: {
-    textAlign: 'center',
-    color: colors.secondary,
-    fontSize: 12,
-    marginTop: 8,
     marginBottom: 24,
   },
   input: {
@@ -156,29 +146,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 8,
-    padding: 14,
-    marginBottom: 12,
-    fontSize: 16,
+    padding: 16,
+    marginBottom: 14,
+    fontSize: typography.body,
   },
   error: {
     color: colors.error,
-    marginBottom: 12,
+    marginBottom: 14,
+    fontSize: typography.body,
   },
   button: {
     backgroundColor: colors.primary,
     borderRadius: 8,
-    padding: 16,
+    padding: 18,
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   buttonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: typography.body,
     fontWeight: '600',
   },
   link: {
     textAlign: 'center',
     color: colors.primary,
-    marginTop: 8,
+    marginTop: 10,
+    fontSize: typography.body,
+    fontWeight: '500',
   },
 });

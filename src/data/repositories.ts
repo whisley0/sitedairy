@@ -38,6 +38,7 @@ export interface SiteDiaryRepository {
   getEscalations(): Promise<EmergencyEscalation[]>;
   submitEscalation(input: SubmitEscalationInput): Promise<EmergencyEscalation>;
   resolveEscalation(escalationId: string): Promise<EmergencyEscalation>;
+  reopenEscalation(escalationId: string): Promise<EmergencyEscalation>;
 }
 
 /** Dummy auth — simulates Firebase Email/Password without network calls. */
@@ -283,6 +284,19 @@ export class DummySiteDiaryRepository implements SiteDiaryRepository {
       throw new Error('Escalation not found.');
     }
     escalation.status = 'RESOLVED';
+    return { ...escalation };
+  }
+
+  async reopenEscalation(escalationId: string): Promise<EmergencyEscalation> {
+    await delay(300);
+    const index = this.escalationList.findIndex((item) => item.id === escalationId);
+    if (index === -1) {
+      throw new Error('Escalation not found.');
+    }
+    const escalation = this.escalationList[index];
+    escalation.status = 'OPEN';
+    this.escalationList.splice(index, 1);
+    this.escalationList.unshift(escalation);
     return { ...escalation };
   }
 }

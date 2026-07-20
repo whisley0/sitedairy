@@ -7,15 +7,33 @@ import type {
   RiskQueueItem,
 } from '../data/models';
 import { latestAssessmentRecord, MANUAL_MODEL_ID } from '../data/models';
-import { Classifier, type ClassifierOutput, type HeadName } from '../native/cdv/classifier';
+import { Classifier } from '../native/cdv/classifier';
 import { assessRiskWithGeminiNanoOrCloud } from '../native/llm/geminiRisk';
 import { LocalVLM, resetVlmRuntimeCache, waitForNativeVlmSettle, type RiskInput } from '../native/llm/localLLM';
 import type { VlmModelId } from '../native/llm/modelManager';
 import { getModelSpec } from '../native/llm/modelManager';
+import { embeddingToArray, SiglipEmbedder } from '../native/siglip/embedder';
+import { downloadSiglipModel, isSiglipDownloaded } from '../native/siglip/modelManager';
+import { topKSimilar } from '../native/siglip/similarity';
+import {
+  buildPhotoTags,
+  dedupeOverlappingTags,
+  photoMetaFromClassifier,
+  resolveDomainCode,
+  resolveInspectionTypeCode,
+  resolvePhotoTags,
+  resolveSubjectCode,
+  type PhotoClassifierMeta,
+} from '../utils/photoTags';
 import { deleteRiskPhoto, persistRiskPhoto, resolvePhotoForVlm, resolveRiskPhotoUri } from './riskPhotoStorage';
 
 export type RemoveQueueItemResult = 'ok' | 'not_found' | 'processing';
 export type QueuePhase = 'idle' | 'classifying' | 'assessing';
+
+export interface SimilarPhotoHit {
+  item: RiskQueueItem;
+  score: number;
+}
 
 type Listener = () => void;
 
@@ -32,7 +50,30 @@ class AssessmentHaltedError extends Error {
   }
 }
 
-const topLabel = (out: ClassifierOutput, head: HeadName) => out[head][0].label;
+function resolveInspectionType(item: {
+  inspectionType?: string;
+  labelHint?: string;
+}): string | undefined {
+  const raw = item.inspectionType ?? item.labelHint;
+  if (!raw?.trim()) return undefined;
+  return resolveInspectionTypeCode(raw) || raw.trim();
+}
+
+function canonicalizeClassifierFields(item: {
+  inspectionType?: string;
+  labelHint?: string;
+  domain?: string;
+  subject?: string;
+}) {
+  const inspectionType = resolveInspectionType(item);
+  const domain = item.domain
+    ? resolveDomainCode(item.domain) || item.domain.trim()
+    : undefined;
+  const subject = item.subject
+    ? resolveSubjectCode(item.subject) || item.subject.trim()
+    : undefined;
+  return { inspectionType, domain, subject };
+}
 
 function isNativeVlmFailure(error: unknown): boolean {
   const text = String(error).toLowerCase();
@@ -40,6 +81,7 @@ function isNativeVlmFailure(error: unknown): boolean {
     text.includes('std::exception') ||
     text.includes('sigsegv') ||
     text.includes('photo file missing') ||
+    text.includes('jsi bindings') ||
     text.includes('llama') ||
     text.includes('rnllama')
   );
@@ -47,17 +89,33 @@ function isNativeVlmFailure(error: unknown): boolean {
 
 function migrateItem(raw: RiskQueueItem & { assessment?: import('../data/models').RiskAssessmentResult }): RiskQueueItem {
   if (Array.isArray(raw.assessmentHistory)) {
+    const fields = canonicalizeClassifierFields(raw);
     return {
       ...raw,
-      assessmentHistory: raw.assessmentHistory.map((record) => ({
-        ...record,
-        modelId: record.modelId ?? raw.modelId,
-        modelName: record.modelName ?? raw.modelName,
-      })),
+      ...fields,
+      labelHint: fields.inspectionType ?? raw.labelHint,
+      tags: resolvePhotoTags({
+        tags: raw.tags,
+        inspectionType: fields.inspectionType,
+        domain: fields.domain,
+        subject: fields.subject,
+        labelHint: fields.inspectionType ?? raw.labelHint,
+      }),
+      assessmentHistory: raw.assessmentHistory.map((record) => {
+        const recordFields = canonicalizeClassifierFields(record);
+        return {
+          ...record,
+          ...recordFields,
+          modelId: record.modelId ?? raw.modelId,
+          modelName: record.modelName ?? raw.modelName,
+          labelHint: recordFields.inspectionType ?? record.labelHint,
+        };
+      }),
     };
   }
   const history: RiskAssessmentRecord[] = [];
   const legacy = (raw as { assessment?: RiskAssessmentRecord['result'] }).assessment;
+  const fields = canonicalizeClassifierFields(raw);
   if (legacy) {
     history.push({
       id: `run-${raw.id}-legacy`,
@@ -66,14 +124,27 @@ function migrateItem(raw: RiskQueueItem & { assessment?: import('../data/models'
       durationMs: 0,
       modelId: raw.modelId,
       modelName: raw.modelName,
-      domain: raw.domain,
-      subject: raw.subject,
-      labelHint: raw.labelHint,
+      inspectionType: fields.inspectionType,
+      domain: fields.domain,
+      subject: fields.subject,
+      labelHint: fields.inspectionType ?? raw.labelHint,
       result: legacy,
     });
   }
   const { assessment: _removed, ...rest } = raw as RiskQueueItem & { assessment?: unknown };
-  return { ...rest, assessmentHistory: history };
+  return {
+    ...rest,
+    ...fields,
+    labelHint: fields.inspectionType ?? raw.labelHint,
+    tags: resolvePhotoTags({
+      tags: raw.tags,
+      inspectionType: fields.inspectionType,
+      domain: fields.domain,
+      subject: fields.subject,
+      labelHint: fields.inspectionType ?? raw.labelHint,
+    }),
+    assessmentHistory: history,
+  };
 }
 
 function normalizeHydratedItem(item: RiskQueueItem): RiskQueueItem {
@@ -114,22 +185,26 @@ function pickNextPending(items: RiskQueueItem[]): RiskQueueItem | undefined {
 function classifierPriors(
   item: RiskQueueItem,
 ): { domain: string; subject: string; labelHint: string } | undefined {
-  if (item.domain && item.subject && item.labelHint) {
-    return { domain: item.domain, subject: item.subject, labelHint: item.labelHint };
+  const inspectionType = resolveInspectionType(item);
+  if (item.domain && item.subject && inspectionType) {
+    return { domain: item.domain, subject: item.subject, labelHint: inspectionType };
   }
   const latest = latestAssessmentRecord(item);
-  if (latest?.domain && latest?.subject && latest?.labelHint) {
+  const latestInspection = latest ? resolveInspectionType(latest) : undefined;
+  if (latest?.domain && latest?.subject && latestInspection) {
     return {
       domain: latest.domain,
       subject: latest.subject,
-      labelHint: latest.labelHint,
+      labelHint: latestInspection,
     };
   }
   return undefined;
 }
 
 function shouldSkipClassifier(item: RiskQueueItem): boolean {
-  return Boolean(item.reassessRequestedAt && classifierPriors(item));
+  // Re-assess always re-runs ResNet so tags / inspection type / domain / subject refresh.
+  if (item.reassessRequestedAt) return false;
+  return Boolean(classifierPriors(item));
 }
 
 function manualResultFromComment(comment: string): RiskAssessmentResult {
@@ -148,6 +223,8 @@ class RiskAssessmentQueue {
   private listeners = new Set<Listener>();
   private workerRunning = false;
   private classifier: Classifier | null = null;
+  private siglip: SiglipEmbedder | null = null;
+  private siglipBusy = false;
   private vlm: LocalVLM | null = null;
   private loadedVlmModelId: VlmModelId | null = null;
   private hydrated = false;
@@ -255,6 +332,37 @@ class RiskAssessmentQueue {
     const now = new Date().toISOString();
     const isManual = input.mode === 'manual';
 
+    let meta: Partial<PhotoClassifierMeta> = {
+      inspectionType: input.inspectionType,
+      domain: input.domain,
+      subject: input.subject,
+      tags: input.tags,
+    };
+
+    if (!meta.inspectionType || !meta.domain || !meta.subject) {
+      try {
+        const classified = await this.classifyPhotoUri(photoUri);
+        const inspectionType = meta.inspectionType ?? classified.inspectionType;
+        const domain = meta.domain ?? classified.domain;
+        const subject = meta.subject ?? classified.subject;
+        meta = {
+          inspectionType,
+          domain,
+          subject,
+          tags: resolvePhotoTags({
+            tags: meta.tags,
+            inspectionType,
+            domain,
+            subject,
+          }),
+        };
+      } catch {
+        // Classification is best-effort at enqueue; VLM worker can retry later.
+      }
+    } else if (!meta.tags?.length) {
+      meta.tags = buildPhotoTags(meta.inspectionType, meta.domain, meta.subject);
+    }
+
     let item: RiskQueueItem;
     if (isManual) {
       const comment = input.userComment?.trim() ?? '';
@@ -268,6 +376,10 @@ class RiskAssessmentQueue {
         userComment: comment,
         status: 'done',
         gps: input.gps,
+        inspectionType: meta.inspectionType,
+        domain: meta.domain,
+        subject: meta.subject,
+        tags: meta.tags,
         assessmentHistory: [
           {
             id: `run-${id}-manual`,
@@ -276,6 +388,9 @@ class RiskAssessmentQueue {
             durationMs: 0,
             modelId: MANUAL_MODEL_ID,
             modelName,
+            inspectionType: meta.inspectionType,
+            domain: meta.domain,
+            subject: meta.subject,
             result: manualResultFromComment(comment),
           },
         ],
@@ -290,6 +405,10 @@ class RiskAssessmentQueue {
         mode: 'vlm',
         status: 'pending',
         gps: input.gps,
+        inspectionType: meta.inspectionType,
+        domain: meta.domain,
+        subject: meta.subject,
+        tags: meta.tags,
         assessmentHistory: [],
         createdAt: now,
       };
@@ -298,6 +417,7 @@ class RiskAssessmentQueue {
     this.items.unshift(item);
     await this.persist();
     this.notify();
+    void this.ensureEmbedding(item.id);
     if (!isManual && this.capturePauseDepth === 0) {
       this.enableBackgroundProcessing();
     }
@@ -305,6 +425,141 @@ class RiskAssessmentQueue {
       this.scheduleProcess();
     }
     return item;
+  }
+
+  isSiglipReady(): boolean {
+    return isSiglipDownloaded();
+  }
+
+  async downloadSiglip(
+    onProgress?: (fraction: number) => void,
+  ): Promise<void> {
+    await downloadSiglipModel((info) => {
+      onProgress?.(info.fileFraction >= 0 ? info.fileFraction : 0);
+    });
+  }
+
+  /**
+   * Compute + persist a SigLIP embedding for a gallery item (no-op if present).
+   * Downloads the vision model on first use.
+   */
+  async ensureEmbedding(itemId: string): Promise<boolean> {
+    await this.hydrate();
+    const item = await this.ensurePhotoAvailable(itemId);
+    if (!item || item.photoMissing) return false;
+    if (item.embedding && item.embedding.length >= 8) return true;
+
+    while (this.siglipBusy) {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      const current = this.getItem(itemId);
+      if (current?.embedding && current.embedding.length >= 8) return true;
+    }
+
+    this.siglipBusy = true;
+    try {
+      if (!isSiglipDownloaded()) {
+        await this.downloadSiglip();
+      }
+      const embedder = await this.ensureSiglip();
+      const latest = this.getItem(itemId);
+      if (!latest || latest.photoMissing) return false;
+      if (latest.embedding && latest.embedding.length >= 8) return true;
+      const vector = await embedder.embed(latest.photoUri);
+      await this.updateItem(itemId, { embedding: embeddingToArray(vector) });
+      return true;
+    } catch (error) {
+      console.warn('[SigLIP] embed failed:', error);
+      return false;
+    } finally {
+      this.siglipBusy = false;
+    }
+  }
+
+  /** Embed any gallery photos that are missing a SigLIP vector (sequential). */
+  async ensureLibraryEmbeddings(
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<void> {
+    await this.hydrate();
+    const missing = this.items.filter(
+      (item) => !item.photoMissing && (!item.embedding || item.embedding.length < 8),
+    );
+    const total = missing.length;
+    if (total === 0) {
+      onProgress?.(0, 0);
+      return;
+    }
+    let done = 0;
+    for (const item of missing) {
+      await this.ensureEmbedding(item.id);
+      done += 1;
+      onProgress?.(done, total);
+    }
+  }
+
+  /** Rank other gallery photos by SigLIP cosine similarity. */
+  async findSimilarPhotos(itemId: string, k = 6): Promise<SimilarPhotoHit[]> {
+    await this.hydrate();
+    const ready = await this.ensureEmbedding(itemId);
+    const item = this.getItem(itemId);
+    if (!ready || !item?.embedding?.length) return [];
+
+    const hits = topKSimilar(
+      item.embedding,
+      this.items
+        .filter((row) => row.embedding && row.embedding.length >= 8)
+        .map((row) => ({ id: row.id, embedding: row.embedding! })),
+      {
+        k,
+        minScore: 0.38,
+        excludeId: itemId,
+      },
+    );
+
+    return hits
+      .map((hit) => {
+        const other = this.getItem(hit.id);
+        return other ? { item: other, score: hit.score } : null;
+      })
+      .filter((row): row is SimilarPhotoHit => row != null);
+  }
+
+  /** Merge tags from a similar gallery item into the current one. */
+  async applyTagsFromSimilar(itemId: string, sourceItemId: string): Promise<boolean> {
+    await this.hydrate();
+    const target = this.getItem(itemId);
+    const source = this.getItem(sourceItemId);
+    if (!target || !source) return false;
+    const merged = dedupeOverlappingTags([...(target.tags ?? []), ...(source.tags ?? [])]);
+    return this.updateTags(itemId, merged);
+  }
+
+  /** Run ResNet heads only and return inspection type / domain / subject tags. */
+  async classifyPhoto(uri: string): Promise<PhotoClassifierMeta> {
+    return this.classifyPhotoUri(uri);
+  }
+
+  async updateTags(itemId: string, tags: string[]): Promise<boolean> {
+    await this.hydrate();
+    const item = this.getItem(itemId);
+    if (!item) return false;
+
+    const cleaned = tags.map((tag) => tag.trim()).filter(Boolean);
+    const resolved = resolvePhotoTags({
+      tags: cleaned,
+      inspectionType: cleaned[0] ?? item.inspectionType,
+      domain: cleaned[1] ?? item.domain,
+      subject: cleaned[2] ?? item.subject,
+      labelHint: item.labelHint,
+    });
+    const [inspectionType, domain, subject] = resolved;
+    await this.updateItem(itemId, {
+      tags: resolved,
+      inspectionType: inspectionType ?? item.inspectionType,
+      domain: domain ?? item.domain,
+      subject: subject ?? item.subject,
+      labelHint: inspectionType ?? item.labelHint,
+    });
+    return true;
   }
 
   async reassess(itemId: string, model?: ReassessRiskAssessmentInput): Promise<boolean> {
@@ -453,6 +708,16 @@ class RiskAssessmentQueue {
     }
   }
 
+  private async classifyPhotoUri(uri: string): Promise<PhotoClassifierMeta> {
+    const classifier = await this.ensureClassifier();
+    try {
+      const out = await classifier.classify(uri);
+      return photoMetaFromClassifier(out);
+    } finally {
+      // Keep session warm while capture may classify several photos in a row.
+    }
+  }
+
   private async ensureClassifier(): Promise<Classifier> {
     if (!this.classifier) {
       this.classifier = await Classifier.create();
@@ -470,6 +735,23 @@ class RiskAssessmentQueue {
     this.classifier = null;
   }
 
+  private async ensureSiglip(): Promise<SiglipEmbedder> {
+    if (!this.siglip) {
+      this.siglip = await SiglipEmbedder.create();
+    }
+    return this.siglip;
+  }
+
+  private async releaseSiglip() {
+    if (!this.siglip) return;
+    try {
+      await this.siglip.release();
+    } catch {
+      // Ignore native teardown errors.
+    }
+    this.siglip = null;
+  }
+
   private async releaseVlm() {
     if (!this.vlm) return;
     try {
@@ -483,6 +765,7 @@ class RiskAssessmentQueue {
 
   private async releaseAllModels() {
     await this.releaseClassifier();
+    await this.releaseSiglip();
     await this.releaseVlm();
     resetVlmRuntimeCache();
   }
@@ -556,7 +839,7 @@ class RiskAssessmentQueue {
 
         let domain = ready.domain;
         let subject = ready.subject;
-        let labelHint = ready.labelHint;
+        let inspectionType = resolveInspectionType(ready);
         const skipClassifier = shouldSkipClassifier(ready);
         const photoUriForVlm = await resolvePhotoForVlm(ready.id, ready.photoUri);
 
@@ -567,18 +850,37 @@ class RiskAssessmentQueue {
             const priors = classifierPriors(ready)!;
             domain = priors.domain;
             subject = priors.subject;
-            labelHint = priors.labelHint;
+            inspectionType = priors.labelHint;
           } else {
             this.phase = 'classifying';
             this.notify();
 
-            const classifier = await this.ensureClassifier();
-            const out = await classifier.classify(photoUriForVlm);
-            domain = topLabel(out, 'domain');
-            subject = topLabel(out, 'subject');
-            labelHint = topLabel(out, 'label_hint');
+            const meta = await this.classifyPhotoUri(photoUriForVlm);
+            domain = meta.domain;
+            subject = meta.subject;
+            inspectionType = meta.inspectionType;
 
-            await this.updateItem(ready.id, { domain, subject, labelHint });
+            const current = this.getItem(ready.id);
+            const tags = resolvePhotoTags({
+              tags: current?.tags ?? ready.tags,
+              inspectionType,
+              domain,
+              subject,
+              previous: {
+                inspectionType: ready.inspectionType,
+                domain: ready.domain,
+                subject: ready.subject,
+                labelHint: ready.labelHint,
+              },
+            });
+
+            await this.updateItem(ready.id, {
+              domain,
+              subject,
+              inspectionType,
+              labelHint: inspectionType,
+              tags,
+            });
             await this.releaseClassifier();
             await waitForNativeVlmSettle();
           }
@@ -591,9 +893,9 @@ class RiskAssessmentQueue {
 
           const spec = getModelSpec(ready.modelId as VlmModelId);
           const vlmInput: RiskInput = {
-            domain,
-            subject,
-            labelHint,
+            domain: domain ?? '',
+            subject: subject ?? '',
+            labelHint: inspectionType ?? '',
             imageUri: photoUriForVlm,
             userComment: ready.userComment,
           };
@@ -612,9 +914,10 @@ class RiskAssessmentQueue {
             durationMs,
             modelId: ready.modelId,
             modelName: ready.modelName,
+            inspectionType,
             domain,
             subject,
-            labelHint,
+            labelHint: inspectionType,
             userComment: ready.userComment,
             result: assessment,
           };
@@ -649,9 +952,10 @@ class RiskAssessmentQueue {
             durationMs,
             modelId: ready.modelId,
             modelName: ready.modelName,
+            inspectionType,
             domain,
             subject,
-            labelHint,
+            labelHint: inspectionType,
             userComment: ready.userComment,
             error: errorText,
           };

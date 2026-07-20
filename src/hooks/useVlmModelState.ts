@@ -55,19 +55,29 @@ export function useVlmModelState(preferredModelId?: string) {
 
   useEffect(() => {
     let cancelled = false;
-    void checkGeminiNanoStatus().then((status) => {
-      if (cancelled) return;
-      const available = status.available;
-      setGeminiAvailable(available);
-      setRows(initialRows(available));
-      setSelectedId((prev) => {
-        if (prev === 'gemini-nano' && !available) {
-          return preferredDownloadedId(false);
-        }
-        return defaultSelectedId(preferredModelId, available);
+    void checkGeminiNanoStatus()
+      .then((status) => {
+        if (cancelled) return;
+        const available = status.available;
+        setGeminiAvailable(available);
+        setRows(initialRows(available));
+        setSelectedId((prev) => {
+          if (prev === 'gemini-nano' && !available) {
+            return preferredDownloadedId(false);
+          }
+          return defaultSelectedId(preferredModelId, available);
+        });
+        setGeminiChecked(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setGeminiAvailable(false);
+        setRows(initialRows(false));
+        setSelectedId((prev) =>
+          prev === 'gemini-nano' ? preferredDownloadedId(false) : defaultSelectedId(preferredModelId, false),
+        );
+        setGeminiChecked(true);
       });
-      setGeminiChecked(true);
-    });
     return () => {
       cancelled = true;
     };

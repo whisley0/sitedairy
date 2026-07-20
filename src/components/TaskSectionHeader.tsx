@@ -1,9 +1,13 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { useState, useMemo } from 'react';
+import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ComponentProps } from 'react';
 import { useTranslation } from 'react-i18next';
+import { HapticPressable } from './HapticPressable';
+import { TaskSectionHeader as CompleteTaskSectionHeader, TaskSection as CompleteTaskSection } from './complete/TaskSectionHeader';
+import { useUiMode } from '../ui/UiModeProvider';
 import { colors } from '../theme/colors';
+import { useAppTypography } from '../theme/useAppTypography';
 
 type TaskSectionVariant = 'today' | 'future';
 
@@ -19,11 +23,9 @@ const SECTION_THEME: Record<
   TaskSectionVariant,
   {
     titleKey: 'taskSection.todayTitle' | 'taskSection.futureTitle';
-    subtitleKey: 'taskSection.todaySubtitle' | 'taskSection.futureSubtitle';
     backgroundColor: string;
     borderColor: string;
     titleColor: string;
-    subtitleColor: string;
     icon: ComponentProps<typeof Ionicons>['name'];
     iconBackground: string;
     iconColor: string;
@@ -32,11 +34,9 @@ const SECTION_THEME: Record<
 > = {
   today: {
     titleKey: 'taskSection.todayTitle',
-    subtitleKey: 'taskSection.todaySubtitle',
     backgroundColor: '#E3F2FD',
     borderColor: '#90CAF9',
     titleColor: '#0D47A1',
-    subtitleColor: '#1565C0',
     icon: 'flash',
     iconBackground: '#1565C0',
     iconColor: '#FFFFFF',
@@ -44,11 +44,9 @@ const SECTION_THEME: Record<
   },
   future: {
     titleKey: 'taskSection.futureTitle',
-    subtitleKey: 'taskSection.futureSubtitle',
     backgroundColor: '#EDE7F6',
     borderColor: '#B39DDB',
     titleColor: '#4527A0',
-    subtitleColor: '#5E35B1',
     icon: 'calendar',
     iconBackground: '#5E35B1',
     iconColor: '#FFFFFF',
@@ -56,7 +54,13 @@ const SECTION_THEME: Record<
   },
 };
 
-export function TaskSectionHeader({
+export function TaskSectionHeader(props: TaskSectionHeaderProps) {
+  const { isSimplified } = useUiMode();
+  if (!isSimplified) return <CompleteTaskSectionHeader {...props} />;
+  return <TaskSectionHeaderSimplified {...props} />;
+}
+
+function TaskSectionHeaderSimplified({
   variant,
   count,
   expanded,
@@ -64,13 +68,32 @@ export function TaskSectionHeader({
   style,
 }: TaskSectionHeaderProps) {
   const { t } = useTranslation();
+  const typography = useAppTypography();
   const theme = SECTION_THEME[variant];
   const title = t(theme.titleKey);
-  const subtitle = t(theme.subtitleKey);
   const countLabel = t(count === 1 ? 'taskSection.oneTask' : 'taskSection.nTasks', { count });
 
+  const dynamicStyles = useMemo(
+    () =>
+      StyleSheet.create({
+        title: {
+          flex: 1,
+          fontSize: typography.headline,
+          fontWeight: '800',
+          letterSpacing: -0.2,
+        },
+        countText: {
+          color: '#fff',
+          fontSize: typography.xs,
+          fontWeight: '800',
+          letterSpacing: 0.2,
+        },
+      }),
+    [typography],
+  );
+
   return (
-    <Pressable
+    <HapticPressable
       onPress={onToggle}
       style={({ pressed }) => [
         styles.wrapper,
@@ -91,22 +114,19 @@ export function TaskSectionHeader({
       </View>
       <View style={styles.textBlock}>
         <View style={styles.titleRow}>
-          <Text style={[styles.title, { color: theme.titleColor }]}>{title}</Text>
+          <Text style={[dynamicStyles.title, { color: theme.titleColor }]}>{title}</Text>
           <View style={[styles.countPill, { backgroundColor: theme.countBackground }]}>
-            <Text style={styles.countText}>{countLabel}</Text>
+            <Text style={dynamicStyles.countText}>{countLabel}</Text>
           </View>
         </View>
-        <Text style={[styles.subtitle, { color: theme.subtitleColor }]} numberOfLines={expanded ? 2 : 1}>
-          {expanded ? subtitle : t('taskSection.tapToExpand')}
-        </Text>
       </View>
       <Ionicons
         name={expanded ? 'chevron-up' : 'chevron-down'}
-        size={22}
+        size={24}
         color={theme.titleColor}
         style={styles.chevron}
       />
-    </Pressable>
+    </HapticPressable>
   );
 }
 
@@ -118,14 +138,34 @@ interface TaskSectionProps {
   children: React.ReactNode;
 }
 
-export function TaskSection({
+export function TaskSection(props: TaskSectionProps) {
+  const { isSimplified } = useUiMode();
+  if (!isSimplified) return <CompleteTaskSection {...props} />;
+  return <TaskSectionSimplified {...props} />;
+}
+
+function TaskSectionSimplified({
   variant,
   count,
   emptyMessage,
   defaultExpanded = true,
   children,
 }: TaskSectionProps) {
+  const typography = useAppTypography();
   const [expanded, setExpanded] = useState(defaultExpanded);
+
+  const dynamicStyles = useMemo(
+    () =>
+      StyleSheet.create({
+        emptyText: {
+          color: colors.textMuted,
+          fontSize: typography.body,
+          lineHeight: typography.lineHeight.body,
+          textAlign: 'center',
+        },
+      }),
+    [typography],
+  );
 
   return (
     <View style={styles.section}>
@@ -138,7 +178,7 @@ export function TaskSection({
       {expanded ? (
         count === 0 && emptyMessage ? (
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>{emptyMessage}</Text>
+            <Text style={dynamicStyles.emptyText}>{emptyMessage}</Text>
           </View>
         ) : (
           <View style={styles.cards}>{children}</View>
@@ -150,16 +190,16 @@ export function TaskSection({
 
 const styles = StyleSheet.create({
   section: {
-    marginTop: 12,
+    marginTop: 16,
   },
   wrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    padding: 16,
+    padding: 18,
     borderRadius: 14,
     borderWidth: 1,
-    marginBottom: 4,
+    marginBottom: 8,
   },
   wrapperPressed: {
     opacity: 0.92,
@@ -181,27 +221,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
-  title: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-  },
   countPill: {
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  countText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  subtitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
   },
   chevron: {
     marginLeft: 2,
@@ -218,11 +241,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderStyle: 'dashed',
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
   },
 });

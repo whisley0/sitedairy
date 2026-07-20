@@ -7,55 +7,62 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { InfoCard } from '../components/CommonComponents';
-import { RiskQueuePhoto } from '../components/RiskQueuePhoto';
 import { PhotoGpsRow } from '../components/PhotoGpsRow';
-import { VlmModelPicker, vlmModelTitleKey } from '../components/VlmModelPicker';
-import type { RiskAssessmentRecord, RiskQueueItem } from '../data/models';
+import { PhotoTagsEditor } from '../components/PhotoTagsEditor';
+import { PrimaryActionButton } from '../components/PrimaryActionButton';
+import { RiskQueuePhoto } from '../components/RiskQueuePhoto';
+import { SimilarPhotosStrip } from '../components/SimilarPhotosStrip';
+import { vlmModelTitleKey } from '../components/VlmModelPicker';
+import type { RiskQueueItem } from '../data/models';
 import { isManualQueueItem, latestAssessmentRecord } from '../data/models';
 import { useVlmModelState } from '../hooks/useVlmModelState';
+import type { VlmModelId } from '../native/llm/modelManager';
 import { riskAssessmentQueue } from '../services/riskAssessmentQueue';
-import { formatDuration, formatQueueTime } from '../utils/riskQueueFormat';
+import { formatQueueTime } from '../utils/riskQueueFormat';
+import { resolvePhotoTags } from '../utils/photoTags';
 import { colors } from '../theme/colors';
+import { typographySimplified } from '../theme/typography';
 
+const QUICK_CHECK_ID: VlmModelId = 'smolvlm2-2.2b';
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
 interface RiskAssessmentDetailScreenProps {
   itemId: string;
   onDeleted?: () => void;
+  onOpenItem?: (itemId: string) => void;
 }
 
-export function RiskAssessmentDetailScreen({ itemId, onDeleted }: RiskAssessmentDetailScreenProps) {
+export function RiskAssessmentDetailScreen({
+  itemId,
+  onDeleted,
+  onOpenItem,
+}: RiskAssessmentDetailScreenProps) {
   const { t } = useTranslation();
   const [item, setItem] = useState<RiskQueueItem | undefined>(() => riskAssessmentQueue.getItem(itemId));
   const [lang, setLang] = useState<'zh' | 'en'>('en');
-  const [selectedRunId, setSelectedRunId] = useState<string | undefined>(undefined);
-  const [reassessComment, setReassessComment] = useState('');
   const {
     rows,
-    selectedId,
-    visibleModels,
-    recommendedId,
     selectModel,
     handleDownload,
     syncReadyFromDisk,
-    selectedReady,
-    selectedDownloading,
-  } = useVlmModelState(item && !isManualQueueItem(item) ? item.modelId : undefined);
+  } = useVlmModelState(QUICK_CHECK_ID);
 
-  const selectedModelLabel =
-    item && isManualQueueItem(item) ? item.modelName : t(vlmModelTitleKey(selectedId));
+  const quickCheckLabel = t(vlmModelTitleKey(QUICK_CHECK_ID));
+  const quickCheckReady = rows[QUICK_CHECK_ID]?.ready ?? false;
+  const quickCheckDownloading = rows[QUICK_CHECK_ID]?.downloading ?? false;
+  const quickCheckProgress = rows[QUICK_CHECK_ID]?.progress ?? '';
 
-  useEffect(() => {
-    const current = riskAssessmentQueue.getItem(itemId);
-    const latest = current ? latestAssessmentRecord(current) : undefined;
-    setReassessComment(latest?.userComment ?? '');
-  }, [itemId]);
+  useFocusEffect(
+    useCallback(() => {
+      syncReadyFromDisk();
+      selectModel(QUICK_CHECK_ID);
+    }, [selectModel, syncReadyFromDisk]),
+  );
 
   const refresh = useCallback(() => {
     setItem(riskAssessmentQueue.getItem(itemId));
@@ -63,64 +70,46 @@ export function RiskAssessmentDetailScreen({ itemId, onDeleted }: RiskAssessment
 
   useEffect(() => riskAssessmentQueue.subscribe(refresh), [refresh]);
 
-  const history = useMemo(
-    () => [...(item?.assessmentHistory ?? [])].reverse(),
-    [item?.assessmentHistory],
-  );
+  const latestRun = useMemo(() => (item ? latestAssessmentRecord(item) : undefined), [item]);
 
-  const selectedRun = useMemo(() => {
-    if (!history.length) return undefined;
-    if (selectedRunId) {
-      return history.find((run) => run.id === selectedRunId) ?? history[0];
-    }
-    return history[0];
-  }, [history, selectedRunId]);
+  const tags = useMemo(() => {
+    if (!item) return [];
+    return resolvePhotoTags({
+      tags: item.tags,
+      inspectionType: item.inspectionType ?? latestRun?.inspectionType,
+      domain: item.domain ?? latestRun?.domain,
+      subject: item.subject ?? latestRun?.subject,
+      labelHint: item.labelHint ?? latestRun?.labelHint,
+    });
+  }, [item, latestRun]);
 
-  useEffect(() => {
-    if (!item) return;
-    const latest = latestAssessmentRecord(item);
-    if (latest && !selectedRunId) {
-      setSelectedRunId(latest.id);
-    }
-  }, [item, selectedRunId]);
-
-  useFocusEffect(
-    useCallback(() => {
-      syncReadyFromDisk();
-    }, [syncReadyFromDisk]),
-  );
-
-  useEffect(() => {
-    const current = riskAssessmentQueue.getItem(itemId);
-    if (current?.modelId && !isManualQueueItem(current)) {
-      selectModel(current.modelId as typeof selectedId);
-    }
-  }, [itemId, selectModel]);
+  const handleTagsChange = (next: string[]) => {
+    void riskAssessmentQueue.updateTags(itemId, next);
+  };
 
   const handleReassess = async () => {
-    if (!item || !selectedReady) return;
+    if (!item) return;
     if (item.photoMissing) {
       Alert.alert(t('queue.photoUnavailableTitle'), t('riskDetail.photoUnavailableAlert'));
       return;
     }
+    if (!quickCheckReady) {
+      try {
+        await handleDownload(QUICK_CHECK_ID);
+      } catch {
+        Alert.alert(t('riskDetail.downloadFailed'), t('riskDetail.downloadFailedBody'));
+      }
+      return;
+    }
     const ok = await riskAssessmentQueue.reassess(item.id, {
-      modelId: selectedId,
-      modelName: selectedModelLabel,
-      userComment: reassessComment.trim() || undefined,
+      modelId: QUICK_CHECK_ID,
+      modelName: quickCheckLabel,
     });
     if (!ok) {
       Alert.alert(
         t('riskDetail.cannotReassess'),
         item.photoMissing ? t('riskDetail.photoMissing') : t('riskDetail.alreadyProcessing'),
       );
-    }
-  };
-
-  const onDownloadModel = async (id: typeof selectedId) => {
-    try {
-      await handleDownload(id);
-    } catch {
-      Alert.alert(t('riskDetail.downloadFailed'), t('riskDetail.downloadFailedBody'));
     }
   };
 
@@ -171,15 +160,34 @@ export function RiskAssessmentDetailScreen({ itemId, onDeleted }: RiskAssessment
 
   const isPending = item.status === 'pending' || item.status === 'processing';
   const isManual = isManualQueueItem(item);
-  const canReassess =
-    !isPending && selectedReady && !selectedDownloading && !item.photoMissing && !isManual;
+  const canReassess = !isPending && !quickCheckDownloading && !item.photoMissing && !isManual;
   const canStop = isPending && !item.halted;
-  const displayModelName = selectedRun?.modelName ?? item.modelName;
+  const reassessLabel = quickCheckReady
+    ? t('riskDetail.reassessWith', { model: quickCheckLabel })
+    : quickCheckDownloading
+      ? quickCheckProgress || t('vlmPicker.downloading')
+      : t('riskDetail.downloadQuickCheck');
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <RiskQueuePhoto uri={item.photoUri} missing={item.photoMissing} style={styles.photo} missingStyle={styles.photo} />
-      <PhotoGpsRow gps={item.gps} />
+
+      <InfoCard title={t('riskDetail.photoMetaTitle')}>
+        <View style={styles.metaRow}>
+          <Ionicons name="calendar-outline" size={16} color={colors.textMuted} />
+          <Text style={styles.metaText}>
+            {t('riskDetail.takenAt', { time: formatQueueTime(item.createdAt) })}
+          </Text>
+        </View>
+        <PhotoGpsRow gps={item.gps} />
+        <PhotoTagsEditor tags={tags} onChange={handleTagsChange} editable={!isPending} />
+      </InfoCard>
+
+      {!item.photoMissing ? (
+        <InfoCard title={t('similarPhotos.title')}>
+          <SimilarPhotosStrip itemId={item.id} onOpenItem={onOpenItem} />
+        </InfoCard>
+      ) : null}
 
       {item.photoMissing ? (
         <InfoCard title={t('photo.unavailable')}>
@@ -187,21 +195,15 @@ export function RiskAssessmentDetailScreen({ itemId, onDeleted }: RiskAssessment
         </InfoCard>
       ) : null}
 
-      <InfoCard
-        title={selectedRun?.result?.risk ?? t('riskDetail.riskAssessment')}
-        subtitle={t('riskDetail.queuedMeta', {
-          model: displayModelName,
-          time: formatQueueTime(item.createdAt),
-        })}
-      >
+      <InfoCard title={latestRun?.result?.risk ?? t('riskDetail.riskAssessment')}>
         {isPending ? (
           <View style={styles.pendingRow}>
             <ActivityIndicator color={colors.primary} />
             <Text style={styles.pendingText}>
-              {item.status === 'processing' && item.processingStartedAt
+              {item.status === 'processing'
                 ? item.reassessRequestedAt
-                  ? t('riskDetail.vlmRunning', { time: formatQueueTime(item.processingStartedAt) })
-                  : t('riskDetail.bothRunning', { time: formatQueueTime(item.processingStartedAt) })
+                  ? t('riskDetail.vlmRunningSimple')
+                  : t('riskDetail.bothRunningSimple')
                 : t('riskDetail.waitingQueue')}
             </Text>
           </View>
@@ -211,56 +213,54 @@ export function RiskAssessmentDetailScreen({ itemId, onDeleted }: RiskAssessment
           <Text style={styles.haltedText}>{item.error ?? t('riskDetail.halted')}</Text>
         ) : null}
 
-        {selectedRun ? (
-          <Text style={styles.timing}>
-            {t('riskDetail.timing', {
-              model: selectedRun.modelName,
-              duration: formatDuration(selectedRun.durationMs),
-              time: formatQueueTime(selectedRun.completedAt),
-            })}
+        {isManual ? (
+          <Text style={styles.rationale}>
+            {item.userComment || latestRun?.result?.rationale_en || t('common.emDash')}
           </Text>
         ) : null}
 
-        {!isManual ? (
+        {latestRun?.result && !isManual ? (
           <>
-            <Text style={styles.sectionLabel}>
-              {item.photoMissing ? t('riskDetail.modelPickerMissing') : t('riskDetail.modelForNext')}
-            </Text>
-            <VlmModelPicker
-              models={visibleModels}
-              state={rows}
-              selectedId={selectedId}
-              disabled={isPending || item.photoMissing}
-              showHeader
-              recommendedId={recommendedId}
-              onSelect={selectModel}
-              onDownload={onDownloadModel}
-            />
-
-            <Text style={styles.sectionLabel}>{t('riskDetail.reassessCommentLabel')}</Text>
-            <TextInput
-              style={styles.commentInput}
-              value={reassessComment}
-              onChangeText={setReassessComment}
-              placeholder={t('riskDetail.reassessCommentPlaceholder')}
-              placeholderTextColor={colors.textMuted}
-              multiline
-              textAlignVertical="top"
-              editable={!isPending && !item.photoMissing}
-            />
-            <Text style={styles.commentHint}>{t('riskDetail.reassessCommentHint')}</Text>
-
-            <Pressable
-              style={[styles.reassessBtn, !canReassess && styles.reassessBtnDisabled]}
-              disabled={!canReassess}
-              onPress={handleReassess}
-            >
-              <Ionicons name="refresh" size={18} color={canReassess ? '#fff' : colors.textMuted} />
-              <Text style={[styles.reassessBtnText, !canReassess && styles.reassessBtnTextDisabled]}>
-                {t('riskDetail.reassessWith', { model: selectedModelLabel })}
+            {latestRun.userComment ? (
+              <Text style={styles.workerNote}>
+                {t('riskDetail.workerNote')}: {latestRun.userComment}
               </Text>
-            </Pressable>
+            ) : null}
+            <Text style={styles.confidence}>
+              {t('riskDetail.confidence', { pct: pct(latestRun.result.confidence) })}
+            </Text>
+            <View style={styles.langRow}>
+              {(['en', 'zh'] as const).map((l) => (
+                <Pressable
+                  key={l}
+                  onPress={() => setLang(l)}
+                  style={[styles.langChip, lang === l && styles.langChipActive]}
+                >
+                  <Text style={[styles.langChipText, lang === l && styles.langChipTextActive]}>
+                    {l === 'zh' ? t('riskDetail.chinese') : t('riskDetail.english')}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.rationale}>
+              {lang === 'zh'
+                ? latestRun.result.rationale_zh || latestRun.result.rationale_en || t('common.emDash')
+                : latestRun.result.rationale_en || latestRun.result.rationale_zh || t('common.emDash')}
+            </Text>
           </>
+        ) : null}
+
+        {latestRun?.error ? <Text style={styles.error}>{latestRun.error}</Text> : null}
+
+        {!isManual ? (
+          <PrimaryActionButton
+            label={reassessLabel}
+            icon="refresh"
+            onPress={() => void handleReassess()}
+            disabled={!canReassess}
+            loading={quickCheckDownloading}
+            style={styles.reassessBtn}
+          />
         ) : null}
 
         {canStop ? (
@@ -270,86 +270,6 @@ export function RiskAssessmentDetailScreen({ itemId, onDeleted }: RiskAssessment
           </Pressable>
         ) : null}
       </InfoCard>
-
-      {isManual ? (
-        <InfoCard title={t('riskDetail.manualEntryTitle')} subtitle={t('riskDetail.manualEntrySubtitle')}>
-          <Text style={styles.rationale}>
-            {item.userComment || selectedRun?.result?.rationale_en || t('common.emDash')}
-          </Text>
-        </InfoCard>
-      ) : (
-        <InfoCard title={t('riskDetail.classifierTitle')}>
-          <Text style={styles.field}>
-            {t('riskDetail.domain')}{' '}
-            <Text style={styles.value}>{selectedRun?.domain ?? item.domain ?? t('common.emDash')}</Text>
-          </Text>
-          <Text style={styles.field}>
-            {t('riskDetail.subject')}{' '}
-            <Text style={styles.value}>{selectedRun?.subject ?? item.subject ?? t('common.emDash')}</Text>
-          </Text>
-          <Text style={styles.field}>
-            {t('riskDetail.labelHint')}{' '}
-            <Text style={styles.value}>{selectedRun?.labelHint ?? item.labelHint ?? t('common.emDash')}</Text>
-          </Text>
-        </InfoCard>
-      )}
-
-      {selectedRun?.result && !isManual ? (
-        <InfoCard title={t('riskDetail.assessment')}>
-          {selectedRun.userComment ? (
-            <Text style={styles.workerNote}>
-              {t('riskDetail.workerNote')}: {selectedRun.userComment}
-            </Text>
-          ) : null}
-          <Text style={styles.confidence}>
-            {t('riskDetail.confidence', { pct: pct(selectedRun.result.confidence) })}
-          </Text>
-          <View style={styles.langRow}>
-            {(['en', 'zh'] as const).map((l) => (
-              <Pressable
-                key={l}
-                onPress={() => setLang(l)}
-                style={[styles.langChip, lang === l && styles.langChipActive]}
-              >
-                <Text style={[styles.langChipText, lang === l && styles.langChipTextActive]}>
-                  {l === 'zh' ? t('riskDetail.chinese') : t('riskDetail.english')}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-          <Text style={styles.rationale}>
-            {lang === 'zh'
-              ? selectedRun.result.rationale_zh || selectedRun.result.rationale_en || t('common.emDash')
-              : selectedRun.result.rationale_en || selectedRun.result.rationale_zh || t('common.emDash')}
-          </Text>
-          {selectedRun.result.rawVlmOutput ? (
-            <Text style={styles.rawOutput} selectable>
-              {t('riskDetail.modelOutput')} {selectedRun.result.rawVlmOutput.slice(0, 600)}
-              {selectedRun.result.rawVlmOutput.length > 600 ? '…' : ''}
-            </Text>
-          ) : null}
-        </InfoCard>
-      ) : null}
-
-      {selectedRun?.error ? (
-        <InfoCard title={t('riskDetail.error')}>
-          <Text style={styles.error}>{selectedRun.error}</Text>
-        </InfoCard>
-      ) : null}
-
-      {history.length > 0 ? (
-        <InfoCard title={t('riskDetail.history', { count: history.length })} subtitle={t('riskDetail.historySubtitle')}>
-          {history.map((run, index) => (
-            <HistoryRow
-              key={run.id}
-              run={run}
-              runNumber={history.length - index}
-              selected={selectedRun?.id === run.id}
-              onSelect={() => setSelectedRunId(run.id)}
-            />
-          ))}
-        </InfoCard>
-      ) : null}
 
       <Pressable style={styles.deleteBtn} onPress={confirmDelete}>
         <Ionicons name="trash-outline" size={18} color={colors.error} />
@@ -361,41 +281,6 @@ export function RiskAssessmentDetailScreen({ itemId, onDeleted }: RiskAssessment
   );
 }
 
-function HistoryRow({
-  run,
-  runNumber,
-  selected,
-  onSelect,
-}: {
-  run: RiskAssessmentRecord;
-  runNumber: number;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const { t } = useTranslation();
-  const title = run.result?.risk ?? (run.error ? t('riskDetail.failedRun') : t('riskDetail.run'));
-
-  return (
-    <Pressable
-      style={[styles.historyRow, selected && styles.historyRowSelected]}
-      onPress={onSelect}
-    >
-      <View style={styles.historyHeader}>
-        <Text style={styles.historyTitle}>{t('riskDetail.runNumber', { n: runNumber, title })}</Text>
-        <Text style={styles.historyMeta}>
-          {run.modelName} · {formatDuration(run.durationMs)} · {formatQueueTime(run.completedAt)}
-        </Text>
-      </View>
-      {run.result ? (
-        <Text style={styles.historyPreview} numberOfLines={2}>
-          {run.result.rationale_en || run.result.rationale_zh}
-        </Text>
-      ) : null}
-      {run.error ? <Text style={styles.historyError}>{run.error}</Text> : null}
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: 16, paddingBottom: 32 },
@@ -404,52 +289,38 @@ const styles = StyleSheet.create({
     height: 280,
     borderRadius: 12,
     backgroundColor: colors.border,
-    marginBottom: 12,
+    marginBottom: 4,
   },
   photoMissingText: { color: colors.textMuted, fontSize: 14, lineHeight: 20 },
-  timing: { marginTop: 6, fontSize: 14, fontWeight: '600', color: colors.primary },
-  sectionLabel: {
-    marginTop: 14,
-    marginBottom: 8,
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textMuted,
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 2,
   },
-  commentInput: {
-    minHeight: 88,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 15,
+  metaText: {
+    flex: 1,
     color: colors.text,
-    backgroundColor: colors.surface,
+    fontSize: typographySimplified.body,
+    fontWeight: '600',
   },
-  commentHint: { marginTop: 6, marginBottom: 4, color: colors.textMuted, fontSize: 13, lineHeight: 18 },
+  confidence: { marginTop: 4, fontSize: 16, fontWeight: '700', color: colors.primary },
   workerNote: {
-    marginBottom: 10,
+    marginTop: 10,
+    marginBottom: 6,
     color: colors.text,
     fontSize: 14,
     lineHeight: 20,
     fontStyle: 'italic',
   },
-  confidence: { marginTop: 4, fontSize: 16, fontWeight: '700', color: colors.primary },
   pendingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
   pendingText: { color: colors.text, fontSize: 15 },
   haltedText: { marginTop: 8, color: '#E65100', fontSize: 14, lineHeight: 20, fontWeight: '600' },
   reassessBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 12,
-    backgroundColor: colors.primary,
-    borderRadius: 10,
-    paddingVertical: 12,
+    marginTop: 18,
+    minHeight: 72,
+    paddingVertical: 22,
   },
-  reassessBtnDisabled: { backgroundColor: colors.border },
-  reassessBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  reassessBtnTextDisabled: { color: colors.textMuted },
   stopBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -463,8 +334,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   stopBtnText: { color: '#E65100', fontWeight: '700', fontSize: 15 },
-  field: { color: colors.textMuted, fontSize: 14, marginTop: 6 },
-  value: { color: colors.text, fontWeight: '600' },
   langRow: { flexDirection: 'row', gap: 8, marginBottom: 10, marginTop: 8 },
   langChip: {
     paddingHorizontal: 14,
@@ -477,31 +346,7 @@ const styles = StyleSheet.create({
   langChipText: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
   langChipTextActive: { color: '#fff' },
   rationale: { color: colors.text, fontSize: 16, lineHeight: 24 },
-  rawOutput: {
-    marginTop: 12,
-    fontSize: 11,
-    color: colors.textMuted,
-    lineHeight: 16,
-    fontFamily: 'monospace',
-  },
-  error: { color: colors.error, fontSize: 14, lineHeight: 20 },
-  historyRow: {
-    marginTop: 10,
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
-  },
-  historyRowSelected: {
-    borderColor: colors.primary,
-    backgroundColor: '#E3F2FD',
-  },
-  historyHeader: { gap: 2 },
-  historyTitle: { fontSize: 14, fontWeight: '700', color: colors.text },
-  historyMeta: { fontSize: 12, color: colors.textMuted },
-  historyPreview: { marginTop: 6, fontSize: 13, color: colors.text, lineHeight: 18 },
-  historyError: { marginTop: 6, fontSize: 12, color: colors.error },
+  error: { marginTop: 8, color: colors.error, fontSize: 14, lineHeight: 20 },
   deleteBtn: {
     flexDirection: 'row',
     alignItems: 'center',

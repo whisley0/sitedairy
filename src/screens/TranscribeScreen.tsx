@@ -17,6 +17,7 @@ import {
   modelPaths,
   readTokenizerBytes,
 } from '../native/asr/modelManager';
+import { ASR_PRIMARY_LANGUAGE } from '../native/asr/asrConfig';
 
 type Status = 'idle' | 'loading-model' | 'recording' | 'transcribing';
 
@@ -86,10 +87,7 @@ export function TranscribeScreen() {
     setStatus('loading-model');
     const { encoderPath, decoderPath } = modelPaths();
     const tokenizer = await readTokenizerBytes();
-    // 'auto' lets the model's language-ID prompt distinguish Chinese from English
-    // acoustically; a vocabulary mask in Nemotron then restricts the decoded output
-    // to Chinese (Mandarin + Cantonese) and English only.
-    modelRef.current = await Nemotron.create(encoderPath, decoderPath, tokenizer, 'auto');
+    modelRef.current = await Nemotron.create(encoderPath, decoderPath, tokenizer, ASR_PRIMARY_LANGUAGE);
     return modelRef.current;
   };
 

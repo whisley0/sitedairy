@@ -5,7 +5,6 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,13 +16,17 @@ import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { SectionHeader } from '../components/CommonComponents';
+import { HapticPressable } from '../components/HapticPressable';
+import { PhotoTagsEditor } from '../components/PhotoTagsEditor';
 import { VlmModelPicker, vlmModelTitleKey } from '../components/VlmModelPicker';
 import type { RiskAssessmentMode } from '../data/models';
 import type { PhotoGps } from '../data/models';
 import { colors } from '../theme/colors';
+import { typography } from '../theme/typography';
 import { useVlmModelState } from '../hooks/useVlmModelState';
 import type { VlmModelId } from '../native/llm/modelManager';
 import { riskAssessmentQueue } from '../services/riskAssessmentQueue';
+import { formatPhotoTag } from '../utils/photoTags';
 import { resolvePhotoGps } from '../utils/photoGps';
 
 type Status = 'idle' | 'queuing';
@@ -32,6 +35,11 @@ interface StagedPhoto {
   key: string;
   uri: string;
   gps?: PhotoGps;
+  classifying?: boolean;
+  inspectionType?: string;
+  domain?: string;
+  subject?: string;
+  tags?: string[];
 }
 
 interface RiskCaptureScreenProps {
@@ -50,7 +58,6 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
     syncReadyFromDisk,
     anyDownloading,
     selectedReady,
-    anyReady,
   } = useVlmModelState();
   const [mode, setMode] = useState<RiskAssessmentMode>('manual');
   const [staged, setStaged] = useState<StagedPhoto[]>([]);
@@ -75,10 +82,10 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
 
   const busy = status !== 'idle' || anyDownloading;
   const actionsLocked = busy || captureBlocked;
+  // Manual: photos alone are enough (classifier tags / comment are optional).
+  // AI: need a ready VLM selected.
   const canSubmit =
-    staged.length > 0 &&
-    !actionsLocked &&
-    (mode === 'manual' ? comment.trim().length > 0 : selectedReady);
+    staged.length > 0 && !actionsLocked && (mode === 'manual' || selectedReady);
 
   const onDownloadModel = async (id: VlmModelId) => {
     setError(null);
@@ -92,21 +99,64 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
   const selectedModelLabel = t(vlmModelTitleKey(selectedId));
 
   const addStaged = (photos: Array<{ uri: string; gps?: PhotoGps }>) => {
+    const stamped = photos.map((photo) => ({
+      key: `${photo.uri}-${Date.now()}-${Math.random()}`,
+      uri: photo.uri,
+      gps: photo.gps,
+      classifying: true,
+      tags: [] as string[],
+    }));
+
     setStaged((prev) => {
       const existing = new Set(prev.map((p) => p.uri));
-      const next = photos
-        .filter((photo) => !existing.has(photo.uri))
-        .map((photo) => ({
-          key: `${photo.uri}-${Date.now()}-${Math.random()}`,
-          uri: photo.uri,
-          gps: photo.gps,
-        }));
-      return [...prev, ...next];
+      return [...prev, ...stamped.filter((photo) => !existing.has(photo.uri))];
     });
+
+    for (const photo of stamped) {
+      void riskAssessmentQueue
+        .classifyPhoto(photo.uri)
+        .then((meta) => {
+          setStaged((prev) =>
+            prev.map((entry) =>
+              entry.key === photo.key
+                ? {
+                    ...entry,
+                    classifying: false,
+                    inspectionType: meta.inspectionType,
+                    domain: meta.domain,
+                    subject: meta.subject,
+                    tags: meta.tags,
+                  }
+                : entry,
+            ),
+          );
+        })
+        .catch(() => {
+          setStaged((prev) =>
+            prev.map((entry) => (entry.key === photo.key ? { ...entry, classifying: false } : entry)),
+          );
+        });
+    }
   };
 
   const removeStaged = (key: string) => {
     setStaged((prev) => prev.filter((photo) => photo.key !== key));
+  };
+
+  const updateStagedTags = (key: string, tags: string[]) => {
+    setStaged((prev) =>
+      prev.map((photo) => {
+        if (photo.key !== key) return photo;
+        const [inspectionType, domain, subject] = tags;
+        return {
+          ...photo,
+          tags,
+          inspectionType: inspectionType ?? photo.inspectionType,
+          domain: domain ?? photo.domain,
+          subject: subject ?? photo.subject,
+        };
+      }),
+    );
   };
 
   const ensureCanAddPhotos = (): boolean => {
@@ -162,8 +212,6 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
     if (!canSubmit) {
       if (captureBlocked) {
         Alert.alert(t('riskCapture.vlmInProgressTitle'), t('riskCapture.waitVlm'));
-      } else if (mode === 'manual' && !comment.trim()) {
-        Alert.alert(t('riskCapture.commentRequiredTitle'), t('riskCapture.commentRequiredBody'));
       } else if (mode === 'vlm' && !selectedReady) {
         Alert.alert(t('riskCapture.modelRequiredTitle'), t('riskCapture.downloadFirst'));
       }
@@ -186,6 +234,10 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
             mode: 'manual',
             userComment: commentToSave,
             gps: photo.gps,
+            inspectionType: photo.inspectionType,
+            domain: photo.domain,
+            subject: photo.subject,
+            tags: photo.tags,
           });
         }
       } else {
@@ -196,6 +248,10 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
             modelName: selectedModelLabel,
             mode: 'vlm',
             gps: photo.gps,
+            inspectionType: photo.inspectionType,
+            domain: photo.domain,
+            subject: photo.subject,
+            tags: photo.tags,
           });
         }
       }
@@ -228,23 +284,21 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <SectionHeader title={t('riskCapture.title')} description={t('riskCapture.description')} />
+      <SectionHeader title={t('riskCapture.title')} />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {captureBlocked ? (
           <View style={styles.banner}>
             <ActivityIndicator color={colors.primary} size="small" />
             <Text style={styles.bannerText}>{t('riskCapture.vlmBanner')}</Text>
           </View>
-        ) : (
-          <Text style={styles.hintBanner}>{t('riskCapture.queueHint')}</Text>
-        )}
+        ) : null}
 
         <Text style={styles.sectionLabel}>{t('riskCapture.entryMode')}</Text>
         <View style={styles.modeRow}>
           {(['manual', 'vlm'] as const).map((value) => {
             const active = mode === value;
             return (
-              <Pressable
+              <HapticPressable
                 key={value}
                 style={[styles.modeChip, active && styles.modeChipActive]}
                 onPress={() => setMode(value)}
@@ -253,7 +307,7 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
                 <Text style={[styles.modeChipText, active && styles.modeChipTextActive]}>
                   {value === 'vlm' ? t('riskCapture.modeVlm') : t('riskCapture.modeManual')}
                 </Text>
-              </Pressable>
+              </HapticPressable>
             );
           })}
         </View>
@@ -270,7 +324,6 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
               onSelect={selectModel}
               onDownload={onDownloadModel}
             />
-            {!anyReady ? <Text style={styles.hint}>{t('riskCapture.downloadFirst')}</Text> : null}
           </View>
         ) : null}
 
@@ -287,27 +340,26 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
               textAlignVertical="top"
               editable={!busy}
             />
-            <Text style={styles.hint}>{t('riskCapture.manualHint')}</Text>
           </>
         ) : null}
 
         <View style={styles.actionRow}>
-          <Pressable
+          <HapticPressable
             style={[styles.actionBtn, actionsLocked && styles.btnDisabled]}
             disabled={actionsLocked}
             onPress={capture}
           >
-            <Ionicons name="camera" size={22} color="#fff" />
+            <Ionicons name="camera" size={24} color="#fff" />
             <Text style={styles.actionBtnText}>{t('riskCapture.capturePhoto')}</Text>
-          </Pressable>
-          <Pressable
+          </HapticPressable>
+          <HapticPressable
             style={[styles.actionBtnSecondary, actionsLocked && styles.btnDisabled]}
             disabled={actionsLocked}
             onPress={pickFromLibrary}
           >
-            <Ionicons name="images" size={22} color={colors.primary} />
+            <Ionicons name="images" size={24} color={colors.primary} />
             <Text style={styles.actionBtnSecondaryText}>{t('riskCapture.pickPhotos')}</Text>
-          </Pressable>
+          </HapticPressable>
         </View>
 
         {staged.length > 0 ? (
@@ -315,26 +367,47 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
             <Text style={styles.sectionLabel}>
               {t('riskCapture.stagedCount', { count: staged.length })}
             </Text>
-            <View style={styles.stagedGrid}>
-              {staged.map((photo) => (
-                <View key={photo.key} style={styles.stagedTile}>
+            {staged.map((photo) => (
+              <View key={photo.key} style={styles.stagedCard}>
+                <View style={styles.stagedTop}>
                   <Image source={{ uri: photo.uri }} style={styles.stagedImage} resizeMode="cover" />
-                  {photo.gps ? (
-                    <View style={styles.gpsBadge}>
-                      <Ionicons name="location" size={12} color="#fff" />
-                    </View>
-                  ) : null}
-                  <Pressable
+                  <View style={styles.stagedMeta}>
+                    {photo.gps ? (
+                      <View style={styles.gpsRow}>
+                        <Ionicons name="location" size={14} color={colors.primary} />
+                        <Text style={styles.gpsText}>{t('riskCapture.gpsAttached')}</Text>
+                      </View>
+                    ) : null}
+                    {photo.classifying ? (
+                      <View style={styles.classifyingRow}>
+                        <ActivityIndicator color={colors.primary} size="small" />
+                        <Text style={styles.classifyingText}>{t('riskCapture.classifying')}</Text>
+                      </View>
+                    ) : photo.tags?.length ? (
+                      <Text style={styles.tagPreview} numberOfLines={2}>
+                        {formatPhotoTag(photo.tags)}
+                      </Text>
+                    ) : (
+                      <Text style={styles.classifyingText}>{t('riskDetail.tagEmpty')}</Text>
+                    )}
+                  </View>
+                  <HapticPressable
                     style={styles.removeBtn}
                     onPress={() => removeStaged(photo.key)}
                     disabled={busy}
                     accessibilityLabel={t('riskCapture.removePhotoA11y')}
                   >
-                    <Ionicons name="close-circle" size={24} color={colors.error} />
-                  </Pressable>
+                    <Ionicons name="close-circle" size={26} color={colors.error} />
+                  </HapticPressable>
                 </View>
-              ))}
-            </View>
+                <PhotoTagsEditor
+                  tags={photo.tags ?? []}
+                  onChange={(tags) => updateStagedTags(photo.key, tags)}
+                  editable={!busy && !photo.classifying}
+                  compact
+                />
+              </View>
+            ))}
           </View>
         ) : null}
 
@@ -347,18 +420,18 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         {staged.length > 0 ? (
-          <Pressable
+          <HapticPressable
             style={[styles.submitBtn, !canSubmit && styles.btnDisabled]}
             disabled={!canSubmit}
             onPress={submitBatch}
           >
-            <Ionicons name="cloud-upload-outline" size={22} color="#fff" />
+            <Ionicons name="cloud-upload-outline" size={24} color="#fff" />
             <Text style={styles.submitBtnText}>
               {mode === 'manual'
                 ? t('riskCapture.saveManual', { count: staged.length })
                 : t('riskCapture.addToGallery', { count: staged.length })}
             </Text>
-          </Pressable>
+          </HapticPressable>
         ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
@@ -367,27 +440,21 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  body: { padding: 16, paddingBottom: 48 },
+  body: { padding: 18, paddingBottom: 52 },
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 12,
-    padding: 12,
+    marginBottom: 14,
+    padding: 14,
     borderRadius: 10,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  bannerText: { flex: 1, color: colors.text, fontSize: 13, fontWeight: '600', lineHeight: 18 },
-  hintBanner: {
-    marginBottom: 12,
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  pickerHero: { marginBottom: 16 },
-  sectionLabel: { fontSize: 13, fontWeight: '700', color: colors.textMuted, marginBottom: 8, marginTop: 4 },
+  bannerText: { flex: 1, color: colors.text, fontSize: typography.body, fontWeight: '600', lineHeight: typography.lineHeight.body },
+  pickerHero: { marginBottom: 18 },
+  sectionLabel: { fontSize: typography.body, fontWeight: '700', color: colors.textMuted, marginBottom: 10, marginTop: 6 },
   modeRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   modeChip: {
     flex: 1,
@@ -399,7 +466,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   modeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  modeChipText: { color: colors.textMuted, fontWeight: '700', fontSize: 14 },
+  modeChipText: { color: colors.textMuted, fontWeight: '700', fontSize: typography.body },
   modeChipTextActive: { color: '#fff' },
   commentInput: {
     minHeight: 110,
@@ -407,7 +474,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: 10,
     padding: 12,
-    fontSize: 15,
+    fontSize: typography.body,
     color: colors.text,
     backgroundColor: colors.surface,
   },
@@ -423,7 +490,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     elevation: 2,
   },
-  actionBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  actionBtnText: { color: '#fff', fontWeight: '700', fontSize: typography.body },
   actionBtnSecondary: {
     flex: 1,
     flexDirection: 'row',
@@ -436,25 +503,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.primary,
   },
-  actionBtnSecondaryText: { color: colors.primary, fontWeight: '700', fontSize: 15 },
+  actionBtnSecondaryText: { color: colors.primary, fontWeight: '700', fontSize: typography.body },
   stagedSection: { marginTop: 16 },
-  stagedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  stagedTile: { width: '31%', aspectRatio: 1, borderRadius: 10, overflow: 'hidden', backgroundColor: colors.border },
-  stagedImage: { width: '100%', height: '100%' },
-  gpsBadge: {
-    position: 'absolute',
-    left: 4,
-    bottom: 4,
-    backgroundColor: 'rgba(21, 101, 192, 0.9)',
-    borderRadius: 10,
-    padding: 3,
-  },
-  removeBtn: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    backgroundColor: 'rgba(255,255,255,0.9)',
+  stagedCard: {
+    marginBottom: 12,
+    padding: 12,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  stagedTop: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
+  stagedImage: { width: 88, height: 88, borderRadius: 10, backgroundColor: colors.border },
+  stagedMeta: { flex: 1, gap: 6, paddingTop: 2 },
+  gpsRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  gpsText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
+  classifyingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  classifyingText: { color: colors.textMuted, fontSize: 13 },
+  tagPreview: { color: colors.text, fontSize: 13, fontWeight: '700', lineHeight: 18 },
+  removeBtn: {
+    padding: 2,
   },
   submitBtn: {
     flexDirection: 'row',
@@ -466,10 +534,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  submitBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  submitBtnText: { color: '#fff', fontWeight: '700', fontSize: typography.md },
   btnDisabled: { opacity: 0.45 },
-  hint: { marginTop: 8, color: colors.textMuted, fontSize: 13, lineHeight: 18 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16 },
-  statusText: { color: colors.text, fontSize: 15, fontWeight: '600' },
-  error: { color: colors.error, fontSize: 13, marginTop: 12 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 18 },
+  statusText: { color: colors.text, fontSize: typography.body, fontWeight: '600' },
+  error: { color: colors.error, fontSize: typography.body, marginTop: 14 },
 });

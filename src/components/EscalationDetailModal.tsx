@@ -1,22 +1,25 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   Image,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFieldInsets } from '../hooks/useFieldInsets';
 import { useTranslation } from 'react-i18next';
+import { HapticPressable } from './HapticPressable';
+import { PrimaryActionButton } from './PrimaryActionButton';
 import { InfoCard } from './CommonComponents';
-import { CardDateEmphasis, cardMetaStyles } from './CardDateEmphasis';
+import { CardDateEmphasis, useCardMetaStyles } from './CardDateEmphasis';
+import { EscalationDetailModal as CompleteEscalationDetailModal } from './complete/EscalationDetailModal';
 import type { EmergencyEscalation } from '../data/models';
-import { formatEscalationStatus, formatTargetTeam } from '../i18n/localize';
+import { formatTargetTeam } from '../i18n/localize';
 import { colors } from '../theme/colors';
+import { typographySimplified } from '../theme/typography';
+import { useUiMode } from '../ui/UiModeProvider';
 
 interface EscalationDetailModalProps {
   visible: boolean;
@@ -25,14 +28,21 @@ interface EscalationDetailModalProps {
   onResolve: (escalationId: string) => Promise<void>;
 }
 
-export function EscalationDetailModal({
+export function EscalationDetailModal(props: EscalationDetailModalProps) {
+  const { isSimplified } = useUiMode();
+  if (!isSimplified) return <CompleteEscalationDetailModal {...props} />;
+  return <EscalationDetailModalSimplified {...props} />;
+}
+
+function EscalationDetailModalSimplified({
   visible,
   escalation,
   onClose,
   onResolve,
 }: EscalationDetailModalProps) {
+  const cardMetaStyles = useCardMetaStyles();
   const { t } = useTranslation();
-  const insets = useSafeAreaInsets();
+  const field = useFieldInsets();
   const [resolving, setResolving] = useState(false);
 
   if (!escalation) return null;
@@ -51,11 +61,21 @@ export function EscalationDetailModal({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View
+        style={[
+          styles.container,
+          {
+            paddingTop: field.top,
+            paddingLeft: field.left,
+            paddingRight: field.right,
+            paddingBottom: field.bottom,
+          },
+        ]}
+      >
         <View style={styles.header}>
-          <Pressable onPress={onClose} hitSlop={12}>
+          <HapticPressable onPress={onClose} hitSlop={12}>
             <Text style={styles.closeText}>{t('common.close')}</Text>
-          </Pressable>
+          </HapticPressable>
           <Text style={styles.headerTitle}>{t('escalation.detailTitle')}</Text>
           <View style={styles.headerSpacer} />
         </View>
@@ -71,10 +91,6 @@ export function EscalationDetailModal({
                   {formatTargetTeam(escalation.targetTeam, t)}
                 </Text>
                 <CardDateEmphasis date={escalation.escalatedAt} variant="emergency" />
-                <Text style={[cardMetaStyles.separator, cardMetaStyles.separatorEmergency]}>·</Text>
-                <Text style={[cardMetaStyles.muted, cardMetaStyles.mutedEmergency]}>
-                  {formatEscalationStatus(escalation.status, t)}
-                </Text>
               </View>
             }
           >
@@ -93,20 +109,12 @@ export function EscalationDetailModal({
           </InfoCard>
 
           {!isResolved ? (
-            <Pressable
-              style={[styles.resolveButton, resolving && styles.resolveButtonDisabled]}
+            <PrimaryActionButton
+              label={t('escalation.markResolved')}
               onPress={handleResolve}
-              disabled={resolving}
-            >
-              {resolving ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <>
-                  <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
-                  <Text style={styles.resolveButtonText}>{t('escalation.markResolved')}</Text>
-                </>
-              )}
-            </Pressable>
+              loading={resolving}
+              style={styles.resolveButtonSpacing}
+            />
           ) : (
             <View style={styles.resolvedBanner}>
               <Ionicons name="checkmark-circle" size={20} color={colors.success} />
@@ -135,7 +143,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   headerTitle: {
-    fontSize: 17,
+    fontSize: typographySimplified.lg,
     fontWeight: '600',
     color: colors.text,
   },
@@ -144,12 +152,12 @@ const styles = StyleSheet.create({
   },
   closeText: {
     color: colors.primary,
-    fontSize: 16,
+    fontSize: typographySimplified.body,
     fontWeight: '600',
   },
   content: {
-    padding: 16,
-    paddingBottom: 32,
+    padding: 18,
+    paddingBottom: 36,
   },
   linkedTask: {
     flexDirection: 'row',
@@ -161,14 +169,14 @@ const styles = StyleSheet.create({
   linkedTaskText: {
     flex: 1,
     color: 'rgba(255,255,255,0.95)',
-    fontSize: 14,
+    fontSize: typographySimplified.body,
     fontWeight: '600',
   },
   body: {
-    marginTop: 8,
+    marginTop: 10,
     color: 'rgba(255,255,255,0.95)',
-    fontSize: 16,
-    lineHeight: 24,
+    fontSize: typographySimplified.body,
+    lineHeight: typographySimplified.lineHeight.body,
   },
   photo: {
     width: '100%',
@@ -177,23 +185,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     backgroundColor: 'rgba(255,255,255,0.2)',
   },
-  resolveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: colors.success,
-    borderRadius: 10,
-    paddingVertical: 16,
-    marginTop: 8,
-  },
-  resolveButtonDisabled: {
-    opacity: 0.6,
-  },
-  resolveButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
+  resolveButtonSpacing: {
+    marginTop: 12,
   },
   resolvedBanner: {
     flexDirection: 'row',
@@ -209,7 +202,7 @@ const styles = StyleSheet.create({
   },
   resolvedText: {
     color: colors.success,
-    fontSize: 15,
+    fontSize: typographySimplified.body,
     fontWeight: '600',
   },
 });

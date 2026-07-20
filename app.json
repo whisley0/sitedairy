@@ -34,6 +34,7 @@
       ],
       "onnxruntime-react-native",
       "./plugins/withOnnxruntimeAndroid",
+      "@siteed/sherpa-onnx.rn",
       "expo-build-properties",
       [
         "llama.rn",

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import {
   createBottomTabNavigator,
@@ -9,13 +9,18 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EscalationModal } from '../components/EscalationModal';
+import { HapticPressable } from '../components/HapticPressable';
 import type { AuthRepository, SiteDiaryRepository } from '../data/repositories';
 import type { SiteTask } from '../data/models';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { ProgressScreen } from '../screens/ProgressScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
-import { SiteDiaryStack } from './AssessmentsStack';
+import { SiteDiaryStack } from './SiteDiaryStack';
 import { colors } from '../theme/colors';
+import { fieldTabBarBottomInset } from '../theme/layout';
+import { typography } from '../theme/typography';
+import { useUiMode } from '../ui/UiModeProvider';
+import { MainTabs as CompleteMainTabs } from '../components/complete/MainTabs';
 
 export type MainTabParamList = {
   Home: undefined;
@@ -56,7 +61,7 @@ function CustomTabBar({
     const label = options.title ?? t(TAB_LABEL_KEYS[route.name as keyof MainTabParamList]);
 
     return (
-      <Pressable
+      <HapticPressable
         key={route.key}
         style={styles.tabItem}
         onPress={() => navigation.navigate(route.name)}
@@ -64,20 +69,20 @@ function CustomTabBar({
         accessibilityState={isFocused ? { selected: true } : {}}
         accessibilityLabel={label}
       >
-        {options.tabBarIcon?.({ focused: isFocused, color, size: 24 })}
+        {options.tabBarIcon?.({ focused: isFocused, color, size: 26 })}
         <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
           {label}
         </Text>
-      </Pressable>
+      </HapticPressable>
     );
   };
 
   return (
-    <View style={[styles.tabBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+    <View style={[styles.tabBar, { paddingBottom: fieldTabBarBottomInset(insets.bottom) }]}>
       <View style={styles.tabRow}>
         {leftRoutes.map((route, index) => renderTab(route, index))}
         <View style={styles.emergencySlot}>
-          <Pressable
+          <HapticPressable
             style={styles.emergencyPressable}
             onPress={onEmergency}
             accessibilityRole="button"
@@ -85,11 +90,11 @@ function CustomTabBar({
           >
             <View style={styles.emergencyRing}>
               <View style={styles.emergencyButton}>
-                <Ionicons name="alert" size={28} color="#fff" />
+                <Ionicons name="alert" size={30} color="#fff" />
                 <Text style={styles.emergencyText}>{t('tabs.emergency')}</Text>
               </View>
             </View>
-          </Pressable>
+          </HapticPressable>
         </View>
         {rightRoutes.map((route, index) => renderTab(route, index + 2))}
       </View>
@@ -97,7 +102,13 @@ function CustomTabBar({
   );
 }
 
-export function MainTabs({ authRepository, diaryRepository }: MainTabsProps) {
+export function MainTabs(props: MainTabsProps) {
+  const { isSimplified } = useUiMode();
+  if (!isSimplified) return <CompleteMainTabs {...props} />;
+  return <MainTabsSimplified {...props} />;
+}
+
+function MainTabsSimplified({ authRepository, diaryRepository }: MainTabsProps) {
   const { t } = useTranslation();
   const [escalationVisible, setEscalationVisible] = useState(false);
   const [linkedTask, setLinkedTask] = useState<SiteTask | null>(null);
@@ -201,7 +212,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   tabLabel: {
-    fontSize: 11,
+    fontSize: typography.sm,
     fontWeight: '600',
   },
   emergencySlot: {
@@ -237,7 +248,7 @@ const styles = StyleSheet.create({
   },
   emergencyText: {
     color: '#fff',
-    fontSize: 10,
+    fontSize: typography.xs,
     fontWeight: '800',
     marginTop: 2,
     textAlign: 'center',

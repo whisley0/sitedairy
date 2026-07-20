@@ -1,0 +1,49 @@
+{
+  "head": "domain",
+  "mode": "multilabel",
+  "activation": "sigmoid",
+  "threshold": 0.5,
+  "classes": [
+    "ceiling",
+    "facade",
+    "flooring",
+    "housekeeping",
+    "mep",
+    "paint",
+    "structural",
+    "waterproofing"
+  ],
+  "class_to_index": {
+    "ceiling": 0,
+    "facade": 1,
+    "flooring": 2,
+    "housekeeping": 3,
+    "mep": 4,
+    "paint": 5,
+    "structural": 6,
+    "waterproofing": 7
+  },
+  "num_classes": 8,
+  "architecture": "resnet18",
+  "image_size": 224,
+  "input_layout": "NCHW",
+  "input_name": "images",
+  "output_name": "logits",
+  "preprocess": {
+    "resize": 224,
+    "scale_0_1": true,
+    "mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "color_order": "RGB"
+  },
+  "checkpoint_path": "C:\\Software\\PythonProjects\\FullStack_RAG\\backend\\model\\baseline_domain_v1\\checkpoint_best.pt",
+  "exported_at": "2026-07-17T01:33:47.901364+00:00"
+}

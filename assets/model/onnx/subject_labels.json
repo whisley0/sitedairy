@@ -1,0 +1,51 @@
+{
+  "head": "subject",
+  "mode": "multilabel",
+  "activation": "sigmoid",
+  "threshold": 0.5,
+  "classes": [
+    "concrete_work",
+    "floor_dry",
+    "formwork",
+    "housekeeping",
+    "paint_finish",
+    "rebar_fixing",
+    "surface_defect",
+    "tbar_setup",
+    "waterproofing"
+  ],
+  "class_to_index": {
+    "concrete_work": 0,
+    "floor_dry": 1,
+    "formwork": 2,
+    "housekeeping": 3,
+    "paint_finish": 4,
+    "rebar_fixing": 5,
+    "surface_defect": 6,
+    "tbar_setup": 7,
+    "waterproofing": 8
+  },
+  "num_classes": 9,
+  "architecture": "resnet18",
+  "image_size": 224,
+  "input_layout": "NCHW",
+  "input_name": "images",
+  "output_name": "logits",
+  "preprocess": {
+    "resize": 224,
+    "scale_0_1": true,
+    "mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "color_order": "RGB"
+  },
+  "checkpoint_path": "C:\\Software\\PythonProjects\\FullStack_RAG\\backend\\model\\baseline_subject_v1\\checkpoint_best.pt",
+  "exported_at": "2026-07-17T01:33:48.264696+00:00"
+}

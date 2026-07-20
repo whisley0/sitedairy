@@ -13,7 +13,10 @@ function rm(target) {
 rm(path.join(root, '.expo'));
 rm(path.join(root, 'node_modules', '.cache'));
 rm(path.join(root, 'android', 'app', 'build'));
+rm(path.join(root, 'android', 'app', '.cxx'));
 rm(path.join(root, 'android', 'build'));
 rm(path.join(root, 'android', '.gradle'));
+rm(path.join(root, 'node_modules', 'llama.rn', 'android', 'build'));
+rm(path.join(root, 'node_modules', 'llama.rn', 'android', '.cxx'));
 
 console.log('Cache cleared. Run: npm run android:clean');

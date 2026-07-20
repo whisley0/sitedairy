@@ -7,6 +7,8 @@ import { AuthScreen } from './src/screens/AuthScreen';
 import { MainTabs } from './src/navigation/MainTabs';
 import { DummyAuthRepository, DummySiteDiaryRepository } from './src/data/repositories';
 import { LanguageProvider } from './src/i18n/LanguageProvider';
+import { UiModeProvider } from './src/ui/UiModeProvider';
+import { FIELD_CASE_INSET } from './src/theme/layout';
 import './src/i18n';
 import './src/config/firebase';
 
@@ -54,20 +56,22 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <LanguageProvider>
-        <StatusBar style="dark" />
-        <SafeAreaView style={styles.safeArea} edges={['top']}>
-          {isAuthenticated ? (
-            <MainTabs
-              authRepository={authRepository}
-              diaryRepository={diaryRepository}
-            />
-          ) : (
-            <AuthScreen
-              authRepository={authRepository}
-              onAuthenticated={handleAuthenticated}
-            />
-          )}
-        </SafeAreaView>
+        <UiModeProvider>
+          <StatusBar style="dark" />
+          <SafeAreaView style={[styles.safeArea, styles.fieldGutter]} edges={['top']}>
+            {isAuthenticated ? (
+              <MainTabs
+                authRepository={authRepository}
+                diaryRepository={diaryRepository}
+              />
+            ) : (
+              <AuthScreen
+                authRepository={authRepository}
+                onAuthenticated={handleAuthenticated}
+              />
+            )}
+          </SafeAreaView>
+        </UiModeProvider>
       </LanguageProvider>
     </SafeAreaProvider>
   );
@@ -77,5 +81,8 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#FFFFFF',
+  },
+  fieldGutter: {
+    paddingHorizontal: FIELD_CASE_INSET,
   },
 });

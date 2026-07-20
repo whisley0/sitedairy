@@ -18,11 +18,22 @@ index 2f814e8..ce475cb 100644
  
  target_link_libraries(
 diff --git a/node_modules/onnxruntime-react-native/android/build.gradle b/node_modules/onnxruntime-react-native/android/build.gradle
-index 41b4359..dda4580 100644
+index 41b4359..a1b2c3d 100644
 --- a/node_modules/onnxruntime-react-native/android/build.gradle
 +++ b/node_modules/onnxruntime-react-native/android/build.gradle
-@@ -247,7 +247,11 @@ dependencies {
-     extractLibs "com.microsoft.onnxruntime:onnxruntime-android:latest.integration@aar"
+@@ -241,13 +241,24 @@ dependencies {
+ 
+   implementation "junit:junit:4.12"
+ 
++  // Pin ORT to 1.24.3 so libonnxruntimejsi.so matches @siteed/sherpa-onnx.rn
++  // (OrtGetApiBase@VERS_1.24.3). latest.integration can float to 1.27+ and crash at
++  // dlopen when pickFirst keeps sherpa's bundled libonnxruntime.so.
+   if (useQnn) {
+-    extractLibs "com.microsoft.onnxruntime:onnxruntime-android-qnn:latest.integration@aar"
++    extractLibs "com.microsoft.onnxruntime:onnxruntime-android-qnn:1.24.3@aar"
+   } else {
+-    extractLibs "com.microsoft.onnxruntime:onnxruntime-android:latest.integration@aar"
++    extractLibs "com.microsoft.onnxruntime:onnxruntime-android:1.24.3@aar"
    }
  
 -  if (VersionNumber.parse(REACT_NATIVE_VERSION) < VersionNumber.parse("0.71")) {

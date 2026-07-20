@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,8 +13,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFieldInsets } from '../hooks/useFieldInsets';
 import { useTranslation } from 'react-i18next';
+import { HapticPressable } from './HapticPressable';
+import { PrimaryActionButton } from './PrimaryActionButton';
+import { TaskCompleteModal as CompleteTaskCompleteModal } from './complete/TaskCompleteModal';
+import { useUiMode } from '../ui/UiModeProvider';
 import type { CompleteTaskInput, SiteTask, TaskPhoto } from '../data/models';
 import {
   taskIsFullyComplete,
@@ -24,6 +26,7 @@ import {
   taskRequiresMultipleCheckIns,
   taskDurationDays,
 } from '../utils/taskProgress';
+import { taskCompleteButtonLabel } from '../utils/taskCompleteLabel';
 import { takeTaskConfirmationPhoto } from '../utils/taskPhoto';
 import {
   deriveWorkTimesFromPhotos,
@@ -32,6 +35,7 @@ import {
   sortTaskPhotos,
 } from '../utils/taskWork';
 import { colors } from '../theme/colors';
+import { typography } from '../theme/typography';
 
 type PendingPhoto = { key: string; uri: string; uploadedAt: string };
 
@@ -44,9 +48,15 @@ interface TaskCompleteModalProps {
   onComplete: (taskId: string, payload: TaskCompletePayload) => Promise<void>;
 }
 
-export function TaskCompleteModal({ visible, task, onClose, onComplete }: TaskCompleteModalProps) {
+export function TaskCompleteModal(props: TaskCompleteModalProps) {
+  const { isSimplified } = useUiMode();
+  if (!isSimplified) return <CompleteTaskCompleteModal {...props} />;
+  return <TaskCompleteModalSimplified {...props} />;
+}
+
+function TaskCompleteModalSimplified({ visible, task, onClose, onComplete }: TaskCompleteModalProps) {
   const { t } = useTranslation();
-  const insets = useSafeAreaInsets();
+  const field = useFieldInsets();
   const [existingPhotos, setExistingPhotos] = useState<TaskPhoto[]>([]);
   const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
   const [removedPhotoIds, setRemovedPhotoIds] = useState<string[]>([]);
@@ -204,23 +214,26 @@ export function TaskCompleteModal({ visible, task, onClose, onComplete }: TaskCo
   const multiDay = taskRequiresMultipleCheckIns(task);
   const nextCheckIn = taskNextCheckInNumber(task);
   const totalCheckIns = taskDurationDays(task);
-  const isFinalCheckIn = multiDay && nextCheckIn === totalCheckIns;
-  const submitLabel = multiDay
-    ? isFinalCheckIn
-      ? t('taskComplete.submitFinal', { current: nextCheckIn, total: totalCheckIns })
-      : t('taskComplete.submitCheckIn', { current: nextCheckIn, total: totalCheckIns })
-    : t('taskComplete.markDone');
+  const submitLabel = taskCompleteButtonLabel(task, t);
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={handleClose}>
       <KeyboardAvoidingView
-        style={[styles.container, { paddingTop: insets.top }]}
+        style={[
+          styles.container,
+          {
+            paddingTop: field.top,
+            paddingLeft: field.left,
+            paddingRight: field.right,
+            paddingBottom: field.bottom,
+          },
+        ]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.header}>
-          <Pressable onPress={handleClose} hitSlop={12}>
+          <HapticPressable onPress={handleClose} hitSlop={12}>
             <Text style={styles.cancelText}>{t('common.cancel')}</Text>
-          </Pressable>
+          </HapticPressable>
           <Text style={styles.headerTitle}>{t('taskComplete.title')}</Text>
           <View style={styles.headerSpacer} />
         </View>
@@ -240,16 +253,15 @@ export function TaskCompleteModal({ visible, task, onClose, onComplete }: TaskCo
           ) : null}
 
           <Text style={styles.label}>{t('taskComplete.sitePhotos')}</Text>
-          <Text style={styles.hint}>{t('taskComplete.photosHint')}</Text>
           <View style={styles.photoActions}>
-            <Pressable style={styles.photoButton} onPress={takePhoto}>
-              <Ionicons name="camera-outline" size={22} color={colors.primary} />
+            <HapticPressable style={styles.photoButton} onPress={takePhoto}>
+              <Ionicons name="camera-outline" size={24} color={colors.primary} />
               <Text style={styles.photoButtonText}>{t('taskComplete.takePhoto')}</Text>
-            </Pressable>
-            <Pressable style={styles.photoButton} onPress={pickFromLibrary}>
-              <Ionicons name="images-outline" size={22} color={colors.primary} />
+            </HapticPressable>
+            <HapticPressable style={styles.photoButton} onPress={pickFromLibrary}>
+              <Ionicons name="images-outline" size={24} color={colors.primary} />
               <Text style={styles.photoButtonText}>{t('taskComplete.chooseGallery')}</Text>
-            </Pressable>
+            </HapticPressable>
           </View>
 
           {visiblePhotos.length ? (
@@ -257,9 +269,9 @@ export function TaskCompleteModal({ visible, task, onClose, onComplete }: TaskCo
               {visiblePhotos.map((photo) => (
                 <View key={photo.id} style={styles.photoTile}>
                   <Image source={{ uri: photo.uri }} style={styles.photoThumb} resizeMode="cover" />
-                  <Pressable style={styles.removePhoto} onPress={() => removePhoto(photo.id)}>
+                  <HapticPressable style={styles.removePhoto} onPress={() => removePhoto(photo.id)}>
                     <Ionicons name="close-circle" size={24} color={colors.error} />
-                  </Pressable>
+                  </HapticPressable>
                   <Text style={styles.photoTime}>{formatTaskDateTimeForEdit(photo.uploadedAt)}</Text>
                 </View>
               ))}
@@ -267,9 +279,6 @@ export function TaskCompleteModal({ visible, task, onClose, onComplete }: TaskCo
           ) : null}
 
           <Text style={styles.label}>{t('taskComplete.workStartedAt')}</Text>
-          <Text style={styles.hint}>
-            {workStartedAtManual ? t('taskComplete.manualTime') : t('taskComplete.autoFromFirstPhoto')}
-          </Text>
           <TextInput
             style={styles.input}
             value={workStartedAt}
@@ -283,9 +292,6 @@ export function TaskCompleteModal({ visible, task, onClose, onComplete }: TaskCo
           />
 
           <Text style={[styles.label, styles.labelSpaced]}>{t('taskComplete.workEndedAt')}</Text>
-          <Text style={styles.hint}>
-            {workEndedAtManual ? t('taskComplete.manualTime') : t('taskComplete.autoFromLastPhoto')}
-          </Text>
           <TextInput
             style={styles.input}
             value={workEndedAt}
@@ -298,17 +304,12 @@ export function TaskCompleteModal({ visible, task, onClose, onComplete }: TaskCo
             autoCorrect={false}
           />
 
-          <Pressable
-            style={[styles.doneButton, submitting && styles.doneButtonDisabled]}
+          <PrimaryActionButton
+            label={submitLabel}
             onPress={handleComplete}
-            disabled={submitting}
-          >
-            {submitting ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.doneButtonText}>{submitLabel}</Text>
-            )}
-          </Pressable>
+            loading={submitting}
+            style={styles.doneButtonSpacing}
+          />
         </ScrollView>
       </KeyboardAvoidingView>
     </Modal>
@@ -331,7 +332,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   headerTitle: {
-    fontSize: 17,
+    fontSize: typography.lg,
     fontWeight: '600',
     color: colors.text,
   },
@@ -340,22 +341,24 @@ const styles = StyleSheet.create({
   },
   cancelText: {
     color: colors.textMuted,
-    fontSize: 16,
+    fontSize: typography.body,
   },
   form: {
-    padding: 16,
-    paddingBottom: 32,
+    padding: 18,
+    paddingBottom: 36,
   },
   taskTitle: {
-    fontSize: 20,
+    fontSize: typography.cardTitle,
     fontWeight: '700',
+    lineHeight: typography.lineHeight.cardTitle,
     color: colors.text,
   },
   taskDescription: {
-    marginTop: 8,
+    marginTop: 10,
     color: colors.textMuted,
-    lineHeight: 22,
-    marginBottom: 16,
+    fontSize: typography.body,
+    lineHeight: typography.lineHeight.body,
+    marginBottom: 18,
   },
   checkInBanner: {
     backgroundColor: '#E3F2FD',
@@ -366,21 +369,16 @@ const styles = StyleSheet.create({
   checkInBannerText: {
     color: colors.primary,
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: typography.body,
   },
   label: {
-    fontSize: 14,
+    fontSize: typography.body,
     fontWeight: '600',
     color: colors.text,
-    marginBottom: 4,
+    marginBottom: 8,
   },
   labelSpaced: {
-    marginTop: 16,
-  },
-  hint: {
-    fontSize: 13,
-    color: colors.textMuted,
-    marginBottom: 8,
+    marginTop: 18,
   },
   photoActions: {
     flexDirection: 'row',
@@ -401,7 +399,7 @@ const styles = StyleSheet.create({
   },
   photoButtonText: {
     color: colors.primary,
-    fontSize: 14,
+    fontSize: typography.body,
     fontWeight: '600',
   },
   photoGrid: {
@@ -430,7 +428,7 @@ const styles = StyleSheet.create({
   },
   photoTime: {
     marginTop: 4,
-    fontSize: 11,
+    fontSize: typography.sm,
     color: colors.textMuted,
     fontWeight: '500',
   },
@@ -439,23 +437,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 8,
-    padding: 12,
-    fontSize: 15,
+    padding: 14,
+    fontSize: typography.body,
     color: colors.text,
   },
-  doneButton: {
-    backgroundColor: colors.success,
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  doneButtonDisabled: {
-    opacity: 0.6,
-  },
-  doneButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+  doneButtonSpacing: {
+    marginTop: 28,
   },
 });

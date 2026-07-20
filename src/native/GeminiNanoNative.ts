@@ -18,7 +18,14 @@ export function hasGeminiNanoNativeModule(): boolean {
 
 export async function checkGeminiNanoStatus() {
   if (!moduleRef) return { status: -1, available: false, downloadable: false };
-  return moduleRef.checkStatus();
+  try {
+    return await moduleRef.checkStatus();
+  } catch (error) {
+    // AICore FEATURE_NOT_FOUND (606) and similar prep errors mean Nano is not usable
+    // on this device/build — treat as unavailable instead of an uncaught rejection.
+    console.warn('[GeminiNano] checkStatus failed:', error);
+    return { status: 606, available: false, downloadable: false };
+  }
 }
 
 export async function assessRiskWithGeminiNanoNative(

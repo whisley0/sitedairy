@@ -1,13 +1,13 @@
 // On-device CDV image classifier. Runs the three ResNet18 ONNX heads
-// (domain, subject, label_hint) bundled as Metro assets and returns per-head
-// predictions sorted by score. domain/subject are multilabel (sigmoid),
-// label_hint is multiclass (softmax).
+// (domain, subject, inspection_type) bundled as Metro assets and returns
+// per-head predictions sorted by score. domain/subject are multilabel
+// (sigmoid); inspection_type is multiclass (softmax).
 import { InferenceSession, Tensor } from 'onnxruntime-react-native';
 import { Asset } from 'expo-asset';
 import labelsJson from '../../../assets/model/onnx/labels.json';
 import { imageToTensor, type Normalization } from './preprocess';
 
-export type HeadName = 'domain' | 'subject' | 'label_hint';
+export type HeadName = 'domain' | 'subject' | 'inspection_type';
 
 interface HeadMeta {
   file: string;
@@ -19,13 +19,13 @@ interface HeadMeta {
 }
 
 const labels = labelsJson as Record<HeadName, HeadMeta>;
-const HEADS: HeadName[] = ['domain', 'subject', 'label_hint'];
+const HEADS: HeadName[] = ['domain', 'subject', 'inspection_type'];
 
 // require() returns a Metro asset module id once .onnx is in resolver.assetExts.
 const MODEL_MODULES: Record<HeadName, number> = {
   domain: require('../../../assets/model/onnx/domain.onnx'),
   subject: require('../../../assets/model/onnx/subject.onnx'),
-  label_hint: require('../../../assets/model/onnx/label_hint.onnx'),
+  inspection_type: require('../../../assets/model/onnx/inspection_type.onnx'),
 };
 
 export interface Prediction {

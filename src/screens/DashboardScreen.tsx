@@ -18,6 +18,8 @@ import { localizeEscalations, localizeSiteTasks } from '../i18n/localize';
 import { takeTaskConfirmationPhoto } from '../utils/taskPhoto';
 import { taskIsFullyComplete, taskIsLate, sortTasksLateFirst } from '../utils/taskProgress';
 import { colors } from '../theme/colors';
+import { useUiMode } from '../ui/UiModeProvider';
+import { DashboardScreen as CompleteDashboardScreen } from './complete/DashboardScreen';
 
 interface DashboardScreenProps {
   authRepository: AuthRepository;
@@ -30,7 +32,13 @@ type DashboardRow =
   | { key: string; type: 'escalation'; data: EmergencyEscalation }
   | { key: string; type: 'task'; data: SiteTask };
 
-export function DashboardScreen({
+export function DashboardScreen(props: DashboardScreenProps) {
+  const { isSimplified } = useUiMode();
+  if (!isSimplified) return <CompleteDashboardScreen {...props} />;
+  return <DashboardScreenSimplified {...props} />;
+}
+
+function DashboardScreenSimplified({
   authRepository,
   diaryRepository,
   onTaskEscalate,
@@ -44,6 +52,8 @@ export function DashboardScreen({
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedEscalation, setSelectedEscalation] = useState<EmergencyEscalation | null>(null);
   const [escalationDetailVisible, setEscalationDetailVisible] = useState(false);
+  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+  const [resolvingEscalationId, setResolvingEscalationId] = useState<string | null>(null);
   const user = authRepository.currentUser();
 
   const todayTasks = useMemo(
@@ -118,11 +128,30 @@ export function DashboardScreen({
     await loadDashboard();
   };
 
+  const completeTask = async (task: SiteTask) => {
+    setCompletingTaskId(task.id);
+    try {
+      await diaryRepository.completeTask({ taskId: task.id });
+      await loadDashboard();
+    } finally {
+      setCompletingTaskId(null);
+    }
+  };
+
+  const resolveEscalation = async (escalation: EmergencyEscalation) => {
+    setResolvingEscalationId(escalation.id);
+    try {
+      await diaryRepository.resolveEscalation(escalation.id);
+      await loadDashboard();
+    } finally {
+      setResolvingEscalationId(null);
+    }
+  };
+
   const listHeader = (
     <View>
       <SectionHeader
         title={t('dashboard.welcome', { name: user?.displayName ?? t('common.supervisor') })}
-        description={t('dashboard.description')}
       />
       {loading ? <ActivityIndicator color={colors.primary} style={styles.loader} /> : null}
     </View>
@@ -137,12 +166,19 @@ export function DashboardScreen({
         keyExtractor={(item) => item.key}
         renderItem={({ item }) =>
           item.type === 'escalation' ? (
-            <EscalationCard escalation={item.data} onPress={() => openEscalation(item.data)} />
+            <EscalationCard
+              escalation={item.data}
+              onPress={() => openEscalation(item.data)}
+              onResolvePress={() => resolveEscalation(item.data)}
+              resolving={resolvingEscalationId === item.data.id}
+            />
           ) : (
             <TodayTaskCard
               task={item.data}
               onPress={() => openTask(item.data)}
               onPhotoPress={() => submitTaskPhoto(item.data)}
+              onCompletePress={() => completeTask(item.data)}
+              completing={completingTaskId === item.data.id}
               onLongPress={onTaskEscalate ? () => onTaskEscalate(item.data) : undefined}
             />
           )

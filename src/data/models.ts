@@ -142,8 +142,10 @@ export interface RiskAssessmentRecord {
   durationMs: number;
   modelId: string;
   modelName: string;
+  inspectionType?: string;
   domain?: string;
   subject?: string;
+  /** @deprecated Prefer inspectionType. Kept for older persisted records. */
   labelHint?: string;
   /** Optional worker note supplied when re-assessing. */
   userComment?: string;
@@ -167,9 +169,16 @@ export interface RiskQueueItem {
   mode?: RiskAssessmentMode;
   userComment?: string;
   status: RiskQueueStatus;
+  /** ResNet inspection_type head — e.g. BME / BEL / BPD / FAC / ELV. */
+  inspectionType?: string;
   domain?: string;
   subject?: string;
+  /** @deprecated Prefer inspectionType. Kept for older persisted items. */
   labelHint?: string;
+  /** Editable tag list seeded from inspection type + domain + subject. */
+  tags?: string[];
+  /** L2-normalized SigLIP2 vision embedding (768-d) for similar-photo search. */
+  embedding?: number[];
   assessmentHistory: RiskAssessmentRecord[];
   processingStartedAt?: string;
   reassessRequestedAt?: string;
@@ -198,6 +207,10 @@ export interface EnqueueRiskAssessmentInput {
   mode?: RiskAssessmentMode;
   userComment?: string;
   gps?: PhotoGps;
+  inspectionType?: string;
+  domain?: string;
+  subject?: string;
+  tags?: string[];
 }
 
 export function isManualQueueItem(item: RiskQueueItem): boolean {

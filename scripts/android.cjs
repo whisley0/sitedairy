@@ -17,6 +17,56 @@ if (!fs.existsSync(expoCli)) {
   process.exit(1);
 }
 
+const llamaJniLibs = path.join(
+  root,
+  'node_modules',
+  'llama.rn',
+  'android',
+  'src',
+  'main',
+  'jniLibs',
+);
+const llamaArm64Prebuilt = path.join(llamaJniLibs, 'arm64-v8a', 'librnllama.so');
+if (!fs.existsSync(llamaArm64Prebuilt)) {
+  console.error('llama.rn native libs are missing (JSI bindings will fail at runtime).');
+  console.error('Run: node ./node_modules/llama.rn/install/download-native-artifacts.js');
+  console.error('Then: npm run clean && npm run android:clean');
+  process.exit(1);
+}
+
+// Stale CMake configs (from builds before jniLibs existed) skip librnllama_jni*.so.
+// Without those wrappers, RNLlama.loadNative fails → "JSI bindings not installed".
+const cxxDir = path.join(root, 'android', 'app', '.cxx');
+const mergedDebugJni = path.join(
+  root,
+  'android',
+  'app',
+  'build',
+  'intermediates',
+  'merged_native_libs',
+  'debug',
+  'mergeDebugNativeLibs',
+  'out',
+  'lib',
+  'arm64-v8a',
+  'librnllama_jni.so',
+);
+const mergedDebugPrebuilt = path.join(
+  path.dirname(mergedDebugJni),
+  'librnllama.so',
+);
+if (
+  fs.existsSync(mergedDebugPrebuilt) &&
+  !fs.existsSync(mergedDebugJni) &&
+  fs.existsSync(cxxDir)
+) {
+  console.warn(
+    'Detected stale Android native cache: librnllama.so present but librnllama_jni.so missing.',
+  );
+  console.warn('Clearing android/app/.cxx so llama.rn JNI wrappers rebuild...');
+  fs.rmSync(cxxDir, { recursive: true, force: true });
+}
+
 function portInUse(port) {
   return new Promise((resolve) => {
     const server = net.createServer();

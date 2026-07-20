@@ -1,6 +1,10 @@
+import { useMemo } from 'react';
 import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { LanguageToggle } from './LanguageToggle';
+import { HapticPressable } from './HapticPressable';
 import { colors } from '../theme/colors';
+import { useAppTypography } from '../theme/useAppTypography';
+import { useUiMode } from '../ui/UiModeProvider';
 
 interface InfoCardProps {
   title: string;
@@ -11,6 +15,8 @@ interface InfoCardProps {
   style?: ViewStyle;
   variant?: 'default' | 'emergency';
   trailingAction?: React.ReactNode;
+  onHeaderPress?: () => void;
+  onHeaderLongPress?: () => void;
 }
 
 export function InfoCard({
@@ -22,30 +28,88 @@ export function InfoCard({
   style,
   variant = 'default',
   trailingAction,
+  onHeaderPress,
+  onHeaderLongPress,
 }: InfoCardProps) {
+  const typography = useAppTypography();
+  const { isSimplified } = useUiMode();
   const emergency = variant === 'emergency';
+  const headerInteractive = Boolean(onHeaderPress || onHeaderLongPress);
+
+  const titleRow = (
+    <View style={styles.titleRow}>
+      <Text
+        style={[
+          styles.title,
+          {
+            fontSize: typography.cardTitle,
+            lineHeight: typography.lineHeight.cardTitle,
+            fontWeight: isSimplified ? '700' : '600',
+          },
+          emergency && styles.titleEmergency,
+          badge ? styles.titleWithBadge : null,
+        ]}
+      >
+        {title}
+      </Text>
+      {badge ? (
+        <View style={[styles.badge, emergency && styles.badgeEmergency]}>
+          <Text
+            style={[
+              styles.badgeText,
+              { fontSize: typography.xs },
+              emergency && styles.badgeTextEmergency,
+            ]}
+          >
+            {badge}
+          </Text>
+        </View>
+      ) : null}
+      {alertBadge ? (
+        <View style={styles.alertBadge}>
+          <Text style={[styles.alertBadgeText, { fontSize: typography.xs }]}>{alertBadge}</Text>
+        </View>
+      ) : null}
+      {trailingAction}
+    </View>
+  );
+
   return (
-    <View style={[styles.card, emergency && styles.cardEmergency, style]}>
-      <View style={styles.titleRow}>
-        <Text style={[styles.title, emergency && styles.titleEmergency, badge ? styles.titleWithBadge : null]}>
-          {title}
-        </Text>
-        {badge ? (
-          <View style={[styles.badge, emergency && styles.badgeEmergency]}>
-            <Text style={[styles.badgeText, emergency && styles.badgeTextEmergency]}>{badge}</Text>
-          </View>
-        ) : null}
-        {alertBadge ? (
-          <View style={styles.alertBadge}>
-            <Text style={styles.alertBadgeText}>{alertBadge}</Text>
-          </View>
-        ) : null}
-        {trailingAction}
-      </View>
+    <View
+      style={[
+        styles.card,
+        {
+          padding: isSimplified ? 18 : 16,
+          marginBottom: isSimplified ? 14 : 12,
+        },
+        emergency && styles.cardEmergency,
+        style,
+      ]}
+    >
+      {headerInteractive ? (
+        <HapticPressable
+          onPress={onHeaderPress}
+          onLongPress={onHeaderLongPress}
+          delayLongPress={400}
+          disabled={!onHeaderPress && !onHeaderLongPress}
+        >
+          {titleRow}
+        </HapticPressable>
+      ) : (
+        titleRow
+      )}
       {subtitle ? (
         <View style={styles.subtitleWrap}>
           {typeof subtitle === 'string' ? (
-            <Text style={[styles.subtitle, emergency && styles.subtitleEmergency]}>{subtitle}</Text>
+            <Text
+              style={[
+                styles.subtitle,
+                { fontSize: typography.sm },
+                emergency && styles.subtitleEmergency,
+              ]}
+            >
+              {subtitle}
+            </Text>
           ) : (
             subtitle
           )}
@@ -65,23 +129,46 @@ export function SectionHeader({
   description?: string;
   showLanguage?: boolean;
 }) {
+  const typography = useAppTypography();
+  const { isSimplified } = useUiMode();
+
   return (
-    <View style={styles.sectionHeader}>
+    <View
+      style={[
+        styles.sectionHeader,
+        {
+          paddingTop: isSimplified ? 8 : 4,
+          paddingBottom: isSimplified ? 12 : 8,
+        },
+      ]}
+    >
       <View style={styles.sectionTitleRow}>
-        <Text style={styles.sectionTitle} numberOfLines={2}>
+        <Text
+          style={[
+            styles.sectionTitle,
+            {
+              fontSize: typography.title,
+              lineHeight: typography.lineHeight.title,
+            },
+          ]}
+          numberOfLines={2}
+        >
           {title}
         </Text>
         {showLanguage ? <LanguageToggle /> : null}
       </View>
-      {description ? <Text style={styles.sectionDescription}>{description}</Text> : null}
+      {description ? (
+        <Text style={[styles.sectionDescription, { fontSize: typography.sm }]}>{description}</Text>
+      ) : null}
     </View>
   );
 }
 
 export function Chip({ label }: { label: string }) {
+  const typography = useAppTypography();
   return (
     <View style={styles.chip}>
-      <Text style={styles.chipText}>{label}</Text>
+      <Text style={[styles.chipText, { fontSize: typography.sm }]}>{label}</Text>
     </View>
   );
 }
@@ -90,8 +177,6 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -101,8 +186,6 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
     color: colors.text,
   },
   titleWithBadge: {
@@ -131,13 +214,11 @@ const styles = StyleSheet.create({
   },
   alertBadgeText: {
     color: '#fff',
-    fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.3,
   },
   badgeText: {
     color: '#fff',
-    fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
@@ -146,10 +227,9 @@ const styles = StyleSheet.create({
   },
   titleEmergency: {
     color: '#fff',
-    fontWeight: '700',
+    fontWeight: '800',
   },
   subtitle: {
-    fontSize: 13,
     color: colors.textMuted,
   },
   subtitleWrap: {
@@ -160,8 +240,6 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 8,
   },
   sectionTitleRow: {
     flexDirection: 'row',
@@ -171,12 +249,10 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     flex: 1,
-    fontSize: 22,
     fontWeight: '700',
     color: colors.text,
   },
   sectionDescription: {
-    fontSize: 14,
     color: colors.textMuted,
     marginTop: 4,
   },
@@ -190,7 +266,6 @@ const styles = StyleSheet.create({
   },
   chipText: {
     color: colors.secondary,
-    fontSize: 12,
     fontWeight: '600',
   },
 });

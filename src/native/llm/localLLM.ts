@@ -9,6 +9,12 @@ import { toNativeFileUri } from '../../services/riskPhotoStorage';
 import { modelPaths, type VlmModelId } from './modelManager';
 import { buildRiskMessages, isSmallVlmModel, maxPredictTokensForModel } from './riskPrompts';
 import {
+  evaluateAssessmentQuality,
+  isPlaceholderAssessment,
+  revisionFeedbackText,
+  VLM_QUALITY_MAX_ATTEMPTS,
+} from './vlmQuality';
+import {
   defaultVlmProfile,
   llamaInitParams,
   multimodalInitParams,
@@ -111,13 +117,25 @@ export class LocalVLM {
   ): Promise<LocalVLM> {
     const { modelPath, mmprojPath } = modelPaths(modelId);
     const inferThreads = vlmInferThreads();
-    const ctx = await initLlama(
-      {
-        model: modelPath,
-        ...llamaInitParams(profile),
-      },
-      onProgress,
-    );
+    let ctx: LlamaContext;
+    try {
+      ctx = await initLlama(
+        {
+          model: modelPath,
+          ...llamaInitParams(profile),
+        },
+        onProgress,
+      );
+    } catch (e) {
+      const msg = String(e);
+      if (/jsi bindings/i.test(msg)) {
+        throw new Error(
+          'llama.rn JSI bindings not installed. Native libs may be missing — run ' +
+            '`node ./node_modules/llama.rn/install/download-native-artifacts.js` then rebuild the app.',
+        );
+      }
+      throw e;
+    }
     const multimodalOk = await ctx.initMultimodal({
       path: mmprojPath,
       ...multimodalInitParams(profile),
@@ -132,43 +150,77 @@ export class LocalVLM {
 
   async assess(input: RiskInput): Promise<RiskAssessment> {
     const imagePath = await normalizeImagePath(input.imageUri);
-    const messages = buildRiskMessages(this.modelId, input, imagePath);
     const nPredict = maxPredictTokensForModel(this.modelId);
     const lenientStale = isSmallVlmModel(this.modelId);
 
-    const attempts: Array<Parameters<LlamaContext['completion']>[0]> = [
-      {
-        messages,
-        n_predict: nPredict,
-        n_threads: this.inferThreads,
-        temperature: 0.25,
-      },
-    ];
-
+    let revisionFeedback: string | undefined;
+    let best: { assessment: RiskAssessment; score: number } | null = null;
     let lastRaw = '';
-    for (let i = 0; i < attempts.length; i++) {
-      if (i > 0) {
+
+    for (let attempt = 1; attempt <= VLM_QUALITY_MAX_ATTEMPTS; attempt++) {
+      if (attempt > 1) {
         await safeClearCache(this.ctx);
       }
+
+      const temperature = 0.2 + (attempt - 1) * 0.12;
+      let draft: RiskAssessment | null = null;
+
       try {
-        const result = await this.ctx.completion(attempts[i]);
+        const result = await this.ctx.completion({
+          messages: buildRiskMessages(this.modelId, input, imagePath, revisionFeedback),
+          n_predict: nPredict,
+          n_threads: this.inferThreads,
+          temperature,
+        });
         lastRaw = result.text ?? '';
-        const parsed = parseAssessment(lastRaw);
-        if (parsed && !isStaleEcho(parsed, input, lenientStale)) {
-          return { ...parsed, rawVlmOutput: lastRaw };
-        }
+        draft = parseAssessment(lastRaw);
       } catch (e) {
         const text = String(e).toLowerCase();
         if (
           text.includes('std::exception') ||
           text.includes('sigsegv') ||
           text.includes('rnllama') ||
-          text.includes('out of memory')
+          text.includes('out of memory') ||
+          text.includes('jsi bindings')
         ) {
           throw e;
         }
-        if (i === attempts.length - 1) throw e;
+        if (__DEV__) {
+          console.warn(`[VLM] assess attempt ${attempt} failed:`, e);
+        }
+        revisionFeedback = revisionFeedbackText([
+          'previous generation failed — return one complete JSON object only',
+        ]);
+        continue;
       }
+
+      if (!draft || isStaleEcho(draft, input, lenientStale) || isPlaceholderAssessment(draft)) {
+        revisionFeedback = revisionFeedbackText([
+          'previous output copied a template (e.g. "short title") or was invalid — invent a real defect name from the photo and write 4–5 full sentences',
+        ]);
+        continue;
+      }
+
+      const withRaw = { ...draft, rawVlmOutput: lastRaw };
+      const gate = evaluateAssessmentQuality(withRaw, input);
+      if (!isPlaceholderAssessment(withRaw) && (!best || gate.score > best.score)) {
+        best = { assessment: withRaw, score: gate.score };
+      }
+
+      if (!gate.ok) {
+        if (__DEV__) {
+          console.warn(`[VLM] quality gate failed (attempt ${attempt}):`, gate.issues);
+        }
+        revisionFeedback = revisionFeedbackText(gate.issues);
+        continue;
+      }
+
+      // Lightweight heuristic gate passed — accept without a second VLM pass.
+      return withRaw;
+    }
+
+    if (best && !isPlaceholderAssessment(best.assessment)) {
+      return best.assessment;
     }
 
     const fallback = fallbackAssessment(lastRaw, input);
@@ -299,12 +351,14 @@ function parseAssessment(text: string): RiskAssessment | null {
 
     if (!risk && !rationale_en && !rationale_zh) return null;
 
-    return {
+    const assessment = {
       risk: risk || 'Site risk',
       confidence: parseConfidence(parsed.confidence),
       rationale_en: rationale_en || risk || text.trim().slice(0, 500),
       rationale_zh: rationale_zh || rationale_en || '',
     };
+    if (isPlaceholderAssessment(assessment)) return null;
+    return assessment;
   } catch {
     return null;
   }
@@ -336,17 +390,37 @@ function isStaleEcho(assessment: RiskAssessment, input: RiskInput, lenient = fal
 function fallbackAssessment(raw: string, input: RiskInput): RiskAssessment {
   const trimmed = raw.trim();
   const firstLine = trimmed.split(/\r?\n/).find((line) => line.trim())?.trim();
-  const firstLineLooksEcho = !!firstLine && STALE_ECHO_PATTERNS.some((p) => p.test(firstLine));
-  const riskTitle = firstLine && firstLine.length < 120 && !firstLine.startsWith('{') && !firstLineLooksEcho
-    ? firstLine
-    : `${input.subject} risk`;
+  const firstLineLooksEcho =
+    !!firstLine &&
+    (STALE_ECHO_PATTERNS.some((p) => p.test(firstLine)) ||
+      isPlaceholderAssessment({
+        risk: firstLine,
+        confidence: 0,
+        rationale_en: '',
+        rationale_zh: '',
+      }));
+  const subjectTitle = input.subject?.trim() || input.domain?.trim() || 'Site defect';
+  const riskTitle =
+    firstLine &&
+    firstLine.length < 120 &&
+    !firstLine.startsWith('{') &&
+    !firstLineLooksEcho
+      ? firstLine
+      : `${subjectTitle} issue`;
 
   return {
     risk: riskTitle.slice(0, 120),
-    confidence: 0.5,
+    confidence: 0.4,
     rationale_en:
-      trimmed.slice(0, 2000) ||
-      `Classifier: ${input.domain} / ${input.subject} / ${input.labelHint}. VLM did not return parseable JSON.`,
-    rationale_zh: '',
+      `This ${input.labelHint || 'inspection'} photo relates to ${input.domain || 'the site'} / ${input.subject || 'the recorded subject'}. ` +
+      'The on-device model could not produce a full quality-checked finding. ' +
+      'Re-assess after confirming the photo shows the defect clearly, or add a worker note. ' +
+      'Until then, treat this as a provisional flag for site follow-up.',
+    rationale_zh:
+      `此${input.labelHint || '巡查'}相片與${input.domain || '現場'}／${input.subject || '主題'}相關。` +
+      '裝置模型未能產出完整質檢通過的說明。' +
+      '請確認相片清楚顯示缺陷後再重新評估，或加入工人備註。' +
+      '暫作為現場跟進的臨時標記。',
+    rawVlmOutput: trimmed.slice(0, 2000) || undefined,
   };
 }

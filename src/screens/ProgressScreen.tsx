@@ -16,8 +16,19 @@ import { localizeSiteTasks } from '../i18n/localize';
 import { takeTaskConfirmationPhoto } from '../utils/taskPhoto';
 import { taskIsFullyComplete, sortTasksLateFirst } from '../utils/taskProgress';
 import { colors } from '../theme/colors';
+import { useUiMode } from '../ui/UiModeProvider';
+import { ProgressScreen as CompleteProgressScreen } from './complete/ProgressScreen';
 
-export function ProgressScreen({
+export function ProgressScreen(props: {
+  diaryRepository: SiteDiaryRepository;
+  onTaskEscalate?: (task: SiteTask) => void;
+}) {
+  const { isSimplified } = useUiMode();
+  if (!isSimplified) return <CompleteProgressScreen {...props} />;
+  return <ProgressScreenSimplified {...props} />;
+}
+
+function ProgressScreenSimplified({
   diaryRepository,
   onTaskEscalate,
 }: {
@@ -30,6 +41,7 @@ export function ProgressScreen({
   const [rawTomorrowTasks, setRawTomorrowTasks] = useState<SiteTask[]>([]);
   const [selectedTask, setSelectedTask] = useState<SiteTask | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
 
   const todayTasks = useMemo(
     () => sortTasksLateFirst(localizeSiteTasks(rawTodayTasks, t)),
@@ -68,12 +80,24 @@ export function ProgressScreen({
     await loadTasks();
   };
 
+  const completeTask = async (task: SiteTask) => {
+    setCompletingTaskId(task.id);
+    try {
+      await diaryRepository.completeTask({ taskId: task.id });
+      await loadTasks();
+    } finally {
+      setCompletingTaskId(null);
+    }
+  };
+
   const renderTask = (task: SiteTask) => (
     <TodayTaskCard
       key={task.id}
       task={task}
       onPress={() => openTask(task)}
       onPhotoPress={() => submitTaskPhoto(task)}
+      onCompletePress={() => completeTask(task)}
+      completing={completingTaskId === task.id}
       onLongPress={onTaskEscalate ? () => onTaskEscalate(task) : undefined}
     />
   );
@@ -81,7 +105,7 @@ export function ProgressScreen({
   return (
     <View style={styles.wrapper}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <SectionHeader title={t('progress.title')} description={t('progress.description')} />
+        <SectionHeader title={t('progress.title')} />
         {loading ? (
           <ActivityIndicator color={colors.primary} style={styles.loader} />
         ) : (
