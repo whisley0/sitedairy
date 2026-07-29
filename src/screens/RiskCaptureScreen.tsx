@@ -19,14 +19,14 @@ import { SectionHeader } from '../components/CommonComponents';
 import { HapticPressable } from '../components/HapticPressable';
 import { PhotoTagsEditor } from '../components/PhotoTagsEditor';
 import { VlmModelPicker, vlmModelTitleKey } from '../components/VlmModelPicker';
-import type { RiskAssessmentMode } from '../data/models';
-import type { PhotoGps } from '../data/models';
+import type { PhotoBle, PhotoGps, RiskAssessmentMode } from '../data/models';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
 import { useVlmModelState } from '../hooks/useVlmModelState';
 import type { VlmModelId } from '../native/llm/modelManager';
 import { riskAssessmentQueue } from '../services/riskAssessmentQueue';
 import { formatPhotoTag } from '../utils/photoTags';
+import { resolvePhotoBle } from '../utils/photoBle';
 import { resolvePhotoGps } from '../utils/photoGps';
 
 type Status = 'idle' | 'queuing';
@@ -35,6 +35,7 @@ interface StagedPhoto {
   key: string;
   uri: string;
   gps?: PhotoGps;
+  ble?: PhotoBle;
   classifying?: boolean;
   inspectionType?: string;
   domain?: string;
@@ -98,11 +99,12 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
 
   const selectedModelLabel = t(vlmModelTitleKey(selectedId));
 
-  const addStaged = (photos: Array<{ uri: string; gps?: PhotoGps }>) => {
+  const addStaged = (photos: Array<{ uri: string; gps?: PhotoGps; ble?: PhotoBle }>) => {
     const stamped = photos.map((photo) => ({
       key: `${photo.uri}-${Date.now()}-${Math.random()}`,
       uri: photo.uri,
       gps: photo.gps,
+      ble: photo.ble,
       classifying: true,
       tags: [] as string[],
     }));
@@ -179,8 +181,8 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
     const result = await ImagePicker.launchCameraAsync({ quality: 0.6, exif: true });
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
-    const gps = await resolvePhotoGps(asset);
-    addStaged([{ uri: asset.uri, gps }]);
+    const [gps, ble] = await Promise.all([resolvePhotoGps(asset), resolvePhotoBle()]);
+    addStaged([{ uri: asset.uri, gps, ble }]);
   };
 
   const pickFromLibrary = async () => {
@@ -199,10 +201,12 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
       exif: true,
     });
     if (result.canceled || !result.assets.length) return;
+    const ble = await resolvePhotoBle();
     const photos = await Promise.all(
       result.assets.map(async (asset) => ({
         uri: asset.uri,
         gps: await resolvePhotoGps(asset),
+        ble,
       })),
     );
     addStaged(photos);
@@ -234,6 +238,7 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
             mode: 'manual',
             userComment: commentToSave,
             gps: photo.gps,
+            ble: photo.ble,
             inspectionType: photo.inspectionType,
             domain: photo.domain,
             subject: photo.subject,
@@ -248,6 +253,7 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
             modelName: selectedModelLabel,
             mode: 'vlm',
             gps: photo.gps,
+            ble: photo.ble,
             inspectionType: photo.inspectionType,
             domain: photo.domain,
             subject: photo.subject,
@@ -376,6 +382,14 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
                       <View style={styles.gpsRow}>
                         <Ionicons name="location" size={14} color={colors.primary} />
                         <Text style={styles.gpsText}>{t('riskCapture.gpsAttached')}</Text>
+                      </View>
+                    ) : null}
+                    {photo.ble ? (
+                      <View style={styles.gpsRow}>
+                        <Ionicons name="bluetooth" size={14} color={colors.primary} />
+                        <Text style={styles.gpsText}>
+                          {t('photoBle.zone', { zone: photo.ble.zoneId })}
+                        </Text>
                       </View>
                     ) : null}
                     {photo.classifying ? (

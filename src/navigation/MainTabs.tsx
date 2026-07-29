@@ -14,8 +14,8 @@ import type { AuthRepository, SiteDiaryRepository } from '../data/repositories';
 import type { SiteTask } from '../data/models';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { ProgressScreen } from '../screens/ProgressScreen';
-import { SettingsScreen } from '../screens/SettingsScreen';
 import { SiteDiaryStack } from './SiteDiaryStack';
+import { SettingsStack } from './SettingsStack';
 import { colors } from '../theme/colors';
 import { fieldTabBarBottomInset } from '../theme/layout';
 import { typography } from '../theme/typography';
@@ -173,7 +173,7 @@ function MainTabsSimplified({ authRepository, diaryRepository }: MainTabsProps) 
             {() => <SiteDiaryStack />}
           </Tab.Screen>
           <Tab.Screen name="Settings" options={{ title: t('tabs.settings') }}>
-            {() => <SettingsScreen />}
+            {() => <SettingsStack />}
           </Tab.Screen>
         </Tab.Navigator>
 

@@ -18,12 +18,12 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { SectionHeader } from '../../components/CommonComponents';
 import { VlmModelPicker, vlmModelTitleKey } from '../../components/complete/VlmModelPicker';
-import type { RiskAssessmentMode } from '../../data/models';
-import type { PhotoGps } from '../../data/models';
+import type { PhotoBle, PhotoGps, RiskAssessmentMode } from '../../data/models';
 import { colors } from '../../theme/colors';
 import { useVlmModelState } from '../../hooks/useVlmModelState';
 import type { VlmModelId } from '../../native/llm/modelManager';
 import { riskAssessmentQueue } from '../../services/riskAssessmentQueue';
+import { resolvePhotoBle } from '../../utils/photoBle';
 import { resolvePhotoGps } from '../../utils/photoGps';
 
 type Status = 'idle' | 'queuing';
@@ -32,6 +32,7 @@ interface StagedPhoto {
   key: string;
   uri: string;
   gps?: PhotoGps;
+  ble?: PhotoBle;
 }
 
 interface RiskCaptureScreenProps {
@@ -90,7 +91,7 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
 
   const selectedModelLabel = t(vlmModelTitleKey(selectedId));
 
-  const addStaged = (photos: Array<{ uri: string; gps?: PhotoGps }>) => {
+  const addStaged = (photos: Array<{ uri: string; gps?: PhotoGps; ble?: PhotoBle }>) => {
     setStaged((prev) => {
       const existing = new Set(prev.map((p) => p.uri));
       const next = photos
@@ -99,6 +100,7 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
           key: `${photo.uri}-${Date.now()}-${Math.random()}`,
           uri: photo.uri,
           gps: photo.gps,
+          ble: photo.ble,
         }));
       return [...prev, ...next];
     });
@@ -128,8 +130,8 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
     const result = await ImagePicker.launchCameraAsync({ quality: 0.6, exif: true });
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
-    const gps = await resolvePhotoGps(asset);
-    addStaged([{ uri: asset.uri, gps }]);
+    const [gps, ble] = await Promise.all([resolvePhotoGps(asset), resolvePhotoBle()]);
+    addStaged([{ uri: asset.uri, gps, ble }]);
   };
 
   const pickFromLibrary = async () => {
@@ -148,10 +150,12 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
       exif: true,
     });
     if (result.canceled || !result.assets.length) return;
+    const ble = await resolvePhotoBle();
     const photos = await Promise.all(
       result.assets.map(async (asset) => ({
         uri: asset.uri,
         gps: await resolvePhotoGps(asset),
+        ble,
       })),
     );
     addStaged(photos);
@@ -183,6 +187,7 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
             mode: 'manual',
             userComment: commentToSave,
             gps: photo.gps,
+            ble: photo.ble,
           });
         }
       } else {
@@ -193,6 +198,7 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
             modelName: selectedModelLabel,
             mode: 'vlm',
             gps: photo.gps,
+            ble: photo.ble,
           });
         }
       }
@@ -321,6 +327,11 @@ export function RiskCaptureScreen({ onQueued }: RiskCaptureScreenProps) {
                       <Ionicons name="location" size={12} color="#fff" />
                     </View>
                   ) : null}
+                  {photo.ble ? (
+                    <View style={[styles.gpsBadge, styles.bleBadge]}>
+                      <Ionicons name="bluetooth" size={12} color="#fff" />
+                    </View>
+                  ) : null}
                   <Pressable
                     style={styles.removeBtn}
                     onPress={() => removeStaged(photo.key)}
@@ -445,6 +456,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(21, 101, 192, 0.9)',
     borderRadius: 10,
     padding: 3,
+  },
+  bleBadge: {
+    left: undefined,
+    right: 4,
+    bottom: 4,
   },
   removeBtn: {
     position: 'absolute',

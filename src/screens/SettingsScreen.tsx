@@ -9,7 +9,11 @@ import { useAppTypography } from '../theme/useAppTypography';
 import type { UiMode } from '../ui/UiModeProvider';
 import { useUiMode } from '../ui/UiModeProvider';
 
-export function SettingsScreen() {
+interface SettingsScreenProps {
+  onOpenBleScan?: () => void;
+}
+
+export function SettingsScreen({ onOpenBleScan }: SettingsScreenProps) {
   const { t } = useTranslation();
   const typography = useAppTypography();
   const { mode, setMode } = useUiMode();
@@ -54,6 +58,27 @@ export function SettingsScreen() {
           <Text style={[styles.sectionLabel, { fontSize: typography.sm }]}>{t('settings.languageLabel')}</Text>
           <LanguageToggle />
         </View>
+
+        {onOpenBleScan ? (
+          <View style={styles.section}>
+            <Text style={[styles.sectionLabel, { fontSize: typography.sm }]}>{t('settings.toolsLabel')}</Text>
+            <HapticPressable
+              style={styles.linkRow}
+              onPress={onOpenBleScan}
+              accessibilityRole="button"
+              accessibilityLabel={t('ble.title')}
+            >
+              <View style={styles.linkIcon}>
+                <Ionicons name="bluetooth" size={20} color={colors.primary} />
+              </View>
+              <View style={styles.linkBody}>
+                <Text style={[styles.linkTitle, { fontSize: typography.body }]}>{t('ble.title')}</Text>
+                <Text style={[styles.linkHint, { fontSize: typography.sm }]}>{t('ble.settingsHint')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            </HapticPressable>
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -99,4 +124,25 @@ const styles = StyleSheet.create({
   modeOptionHint: {
     color: colors.textMuted,
   },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+  },
+  linkIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E3F2FD',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  linkBody: { flex: 1, gap: 2 },
+  linkTitle: { fontWeight: '700', color: colors.text },
+  linkHint: { color: colors.textMuted },
 });

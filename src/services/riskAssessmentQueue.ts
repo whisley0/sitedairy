@@ -376,6 +376,7 @@ class RiskAssessmentQueue {
         userComment: comment,
         status: 'done',
         gps: input.gps,
+        ble: input.ble,
         inspectionType: meta.inspectionType,
         domain: meta.domain,
         subject: meta.subject,
@@ -405,6 +406,7 @@ class RiskAssessmentQueue {
         mode: 'vlm',
         status: 'pending',
         gps: input.gps,
+        ble: input.ble,
         inspectionType: meta.inspectionType,
         domain: meta.domain,
         subject: meta.subject,
@@ -443,16 +445,16 @@ class RiskAssessmentQueue {
    * Compute + persist a SigLIP embedding for a gallery item (no-op if present).
    * Downloads the vision model on first use.
    */
-  async ensureEmbedding(itemId: string): Promise<boolean> {
+  async ensureEmbedding(itemId: string, options?: { force?: boolean }): Promise<boolean> {
     await this.hydrate();
     const item = await this.ensurePhotoAvailable(itemId);
     if (!item || item.photoMissing) return false;
-    if (item.embedding && item.embedding.length >= 8) return true;
+    if (!options?.force && item.embedding && item.embedding.length >= 8) return true;
 
     while (this.siglipBusy) {
       await new Promise((resolve) => setTimeout(resolve, 40));
       const current = this.getItem(itemId);
-      if (current?.embedding && current.embedding.length >= 8) return true;
+      if (!options?.force && current?.embedding && current.embedding.length >= 8) return true;
     }
 
     this.siglipBusy = true;
@@ -463,7 +465,7 @@ class RiskAssessmentQueue {
       const embedder = await this.ensureSiglip();
       const latest = this.getItem(itemId);
       if (!latest || latest.photoMissing) return false;
-      if (latest.embedding && latest.embedding.length >= 8) return true;
+      if (!options?.force && latest.embedding && latest.embedding.length >= 8) return true;
       const vector = await embedder.embed(latest.photoUri);
       await this.updateItem(itemId, { embedding: embeddingToArray(vector) });
       return true;
@@ -491,6 +493,25 @@ class RiskAssessmentQueue {
     let done = 0;
     for (const item of missing) {
       await this.ensureEmbedding(item.id);
+      done += 1;
+      onProgress?.(done, total);
+    }
+  }
+
+  /** Recompute SigLIP embeddings for all gallery photos, then grouping can re-cluster. */
+  async rebuildLibraryEmbeddings(
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<void> {
+    await this.hydrate();
+    const targets = this.items.filter((item) => !item.photoMissing);
+    const total = targets.length;
+    if (total === 0) {
+      onProgress?.(0, 0);
+      return;
+    }
+    let done = 0;
+    for (const item of targets) {
+      await this.ensureEmbedding(item.id, { force: true });
       done += 1;
       onProgress?.(done, total);
     }

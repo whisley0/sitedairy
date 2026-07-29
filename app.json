@@ -41,16 +41,36 @@
         {
           "enableOpenCLAndHexagon": true
         }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "modes": [],
+          "bluetoothAlwaysPermission": "Allow Site Diary to scan nearby Bluetooth devices for site tooling.",
+          "neverForLocation": false
+        }
       ]
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.sitediary.app"
+      "bundleIdentifier": "com.sitediary.app",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "Allow Site Diary to scan nearby Bluetooth devices for site tooling.",
+        "NSBluetoothPeripheralUsageDescription": "Allow Site Diary to scan nearby Bluetooth devices for site tooling."
+      }
     },
     "android": {
       "package": "com.sitediary.app",
       "versionCode": 5,
       "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#1565C0",
         "foregroundImage": "./assets/android-icon-foreground.png",

@@ -126,6 +126,18 @@ export interface PhotoGps {
   source?: 'exif' | 'device';
 }
 
+/** Nearest mapped BLE beacon at photo capture (MAC/UUID + zone). */
+export interface PhotoBle {
+  /** Peripheral address: MAC on Android, UUID on iOS. */
+  deviceId: string;
+  /** Canonical mapped beacon name (e.g. DEMO_Beacon_00001). */
+  name: string;
+  /** Zone id from the beacon map (e.g. 00001). */
+  zoneId: string;
+  rssi: number;
+  capturedAt: string;
+}
+
 export interface RiskAssessmentResult {
   risk: string;
   confidence: number;
@@ -189,6 +201,8 @@ export interface RiskQueueItem {
   error?: string;
   createdAt: string;
   gps?: PhotoGps;
+  /** Mapped BLE beacon + zone when available at capture time. */
+  ble?: PhotoBle;
 }
 
 export function latestAssessmentRecord(item: RiskQueueItem): RiskAssessmentRecord | undefined {
@@ -207,6 +221,7 @@ export interface EnqueueRiskAssessmentInput {
   mode?: RiskAssessmentMode;
   userComment?: string;
   gps?: PhotoGps;
+  ble?: PhotoBle;
   inspectionType?: string;
   domain?: string;
   subject?: string;

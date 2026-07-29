@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { InfoCard } from '../components/CommonComponents';
 import { PhotoGpsRow } from '../components/PhotoGpsRow';
+import { PhotoBleRow } from '../components/PhotoBleRow';
 import { PhotoTagsEditor } from '../components/PhotoTagsEditor';
 import { PrimaryActionButton } from '../components/PrimaryActionButton';
 import { RiskQueuePhoto } from '../components/RiskQueuePhoto';
@@ -180,6 +181,7 @@ export function RiskAssessmentDetailScreen({
           </Text>
         </View>
         <PhotoGpsRow gps={item.gps} />
+        <PhotoBleRow ble={item.ble} />
         <PhotoTagsEditor tags={tags} onChange={handleTagsChange} editable={!isPending} />
       </InfoCard>
 

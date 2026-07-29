@@ -13,8 +13,8 @@ import type { AuthRepository, SiteDiaryRepository } from '../../data/repositorie
 import type { SiteTask } from '../../data/models';
 import { DashboardScreen } from '../../screens/complete/DashboardScreen';
 import { ProgressScreen } from '../../screens/complete/ProgressScreen';
-import { SettingsScreen } from '../../screens/SettingsScreen';
 import { SiteDiaryStack } from '../../navigation/SiteDiaryStack';
+import { SettingsStack } from '../../navigation/SettingsStack';
 import { colors } from '../../theme/colors';
 import { fieldTabBarBottomInset } from '../../theme/layout';
 
@@ -163,7 +163,7 @@ export function MainTabs({ authRepository, diaryRepository }: MainTabsProps) {
             {() => <SiteDiaryStack />}
           </Tab.Screen>
           <Tab.Screen name="Settings" options={{ title: t('tabs.settings') }}>
-            {() => <SettingsScreen />}
+            {() => <SettingsStack />}
           </Tab.Screen>
         </Tab.Navigator>
 

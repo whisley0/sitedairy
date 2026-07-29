@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { RiskQueuePhoto } from '../../components/RiskQueuePhoto';
 import { PhotoGpsRow } from '../../components/PhotoGpsRow';
+import { PhotoBleRow } from '../../components/PhotoBleRow';
 import { SectionHeader } from '../../components/CommonComponents';
 import type { RiskQueueItem, RiskQueueStatus } from '../../data/models';
 import { latestAssessmentResult } from '../../data/models';
@@ -81,6 +82,7 @@ function QueueThumbnail({ item, onPress }: QueueThumbnailProps) {
         {statusLabel(item, t)}
       </Text>
       {item.gps ? <PhotoGpsRow gps={item.gps} compact /> : null}
+      {item.ble ? <PhotoBleRow ble={item.ble} compact /> : null}
     </Pressable>
   );
 }

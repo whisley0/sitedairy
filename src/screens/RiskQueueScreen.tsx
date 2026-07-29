@@ -4,6 +4,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -13,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { HapticPressable } from '../components/HapticPressable';
 import { RiskQueuePhoto } from '../components/RiskQueuePhoto';
 import { PhotoGpsRow } from '../components/PhotoGpsRow';
+import { PhotoBleRow } from '../components/PhotoBleRow';
 import { SectionHeader } from '../components/CommonComponents';
 import type { RiskQueueItem, RiskQueueStatus } from '../data/models';
 import { latestAssessmentResult } from '../data/models';
@@ -27,6 +29,7 @@ import {
 } from '../utils/riskQueueFormat';
 import {
   formatClassifierLabel,
+  formatPhotoTag,
   resolveInspectionTypeCode,
 } from '../utils/photoTags';
 import { colors } from '../theme/colors';
@@ -60,6 +63,42 @@ function tagMetaLabel(item: RiskQueueItem, t: TFunction): string {
   if (domain) return domain;
   if (subject) return subject;
   return formatQueueTimeShort(item.createdAt);
+}
+
+function inspectionDomainLabel(item: RiskQueueItem, t: TFunction): string {
+  const inspectionType = item.inspectionType?.trim()
+    ? formatClassifierLabel('inspectionType', item.inspectionType, t)
+    : '';
+  const domain = item.domain?.trim()
+    ? formatClassifierLabel('domain', item.domain, t)
+    : '';
+  if (inspectionType && domain) return `${inspectionType} · ${domain}`;
+  if (inspectionType) return inspectionType;
+  if (domain) return domain;
+  return t('queue.untagged');
+}
+
+function itemLabelHaystack(item: RiskQueueItem, t: TFunction): string {
+  const parts = [
+    item.inspectionType,
+    item.domain,
+    item.subject,
+    item.labelHint,
+    ...(item.tags ?? []),
+    item.inspectionType
+      ? formatClassifierLabel('inspectionType', item.inspectionType, t)
+      : '',
+    item.domain ? formatClassifierLabel('domain', item.domain, t) : '',
+    item.subject ? formatClassifierLabel('subject', item.subject, t) : '',
+    formatPhotoTag(item.tags, t),
+  ];
+  return parts.filter(Boolean).join(' ').toLowerCase();
+}
+
+function itemMatchesLabelQuery(item: RiskQueueItem, query: string, t: TFunction): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return itemLabelHaystack(item, t).includes(q);
 }
 
 interface QueueThumbnailProps {
@@ -105,9 +144,10 @@ function QueueThumbnail({ item, onPress, groupMode }: QueueThumbnailProps) {
         </Text>
       </View>
       <Text style={styles.tileStatus} numberOfLines={1}>
-        {statusLabel(item, t)}
+        {groupMode === 'similarity' ? inspectionDomainLabel(item, t) : statusLabel(item, t)}
       </Text>
       {item.gps ? <PhotoGpsRow gps={item.gps} compact /> : null}
+      {item.ble ? <PhotoBleRow ble={item.ble} compact /> : null}
     </HapticPressable>
   );
 }
@@ -157,6 +197,8 @@ export function RiskQueueScreen({ onCapture, onOpenItem }: RiskQueueScreenProps)
   const { t } = useTranslation();
   const [items, setItems] = useState<RiskQueueItem[]>(() => riskAssessmentQueue.getItems());
   const [groupMode, setGroupMode] = useState<QueueGroupMode>('time');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [labelQuery, setLabelQuery] = useState('');
   const [indexing, setIndexing] = useState(false);
   const [indexProgress, setIndexProgress] = useState('');
   const indexingRef = useRef(false);
@@ -181,39 +223,61 @@ export function RiskQueueScreen({ onCapture, onOpenItem }: RiskQueueScreenProps)
     [items],
   );
 
-  useEffect(() => {
-    if (groupMode !== 'similarity' || missingEmbeddingCount === 0 || indexingRef.current) return;
-    let cancelled = false;
-    indexingRef.current = true;
-    setIndexing(true);
-    const run = async () => {
+  const runSimilarityIndex = useCallback(
+    async (mode: 'missing' | 'rebuild') => {
+      if (indexingRef.current) return;
+      indexingRef.current = true;
+      setIndexing(true);
+      setIndexProgress(
+        mode === 'rebuild'
+          ? t('queue.resortingSimilarityStart')
+          : t('queue.indexingSimilarityStart'),
+      );
       try {
-        await riskAssessmentQueue.ensureLibraryEmbeddings((done, total) => {
-          if (cancelled) return;
-          setIndexProgress(t('queue.indexingSimilarity', { done, total }));
-        });
+        const onProgress = (done: number, total: number) => {
+          setIndexProgress(
+            mode === 'rebuild'
+              ? t('queue.resortingSimilarity', { done, total })
+              : t('queue.indexingSimilarity', { done, total }),
+          );
+        };
+        if (mode === 'rebuild') {
+          await riskAssessmentQueue.rebuildLibraryEmbeddings(onProgress);
+        } else {
+          await riskAssessmentQueue.ensureLibraryEmbeddings(onProgress);
+        }
       } finally {
         indexingRef.current = false;
-        if (!cancelled) {
-          setIndexing(false);
-          setIndexProgress('');
-          refresh();
-        }
+        setIndexing(false);
+        setIndexProgress('');
+        refresh();
       }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [groupMode, missingEmbeddingCount, refresh, t]);
+    },
+    [refresh, t],
+  );
 
-  const timeSections = useMemo(() => groupQueueItemsByAddedDate(items), [items]);
+  useEffect(() => {
+    if (groupMode !== 'similarity' || missingEmbeddingCount === 0 || indexingRef.current) return;
+    void runSimilarityIndex('missing');
+  }, [groupMode, missingEmbeddingCount, runSimilarityIndex]);
+
+  const handleRefreshSimilarity = useCallback(() => {
+    void runSimilarityIndex('rebuild');
+  }, [runSimilarityIndex]);
+
+  const filteredItems = useMemo(
+    () => items.filter((item) => itemMatchesLabelQuery(item, labelQuery, t)),
+    [items, labelQuery, t],
+  );
+  const labelFilterActive = labelQuery.trim().length > 0;
+
+  const timeSections = useMemo(() => groupQueueItemsByAddedDate(filteredItems), [filteredItems]);
   const tagSections = useMemo(
-    () => groupQueueItemsByInspectionType(items, t('queue.untagged')),
-    [items, t],
+    () => groupQueueItemsByInspectionType(filteredItems, t('queue.untagged')),
+    [filteredItems, t],
   );
   const similaritySections = useMemo(() => {
-    const groups = groupQueueItemsBySimilarity(items, {
+    const groups = groupQueueItemsBySimilarity(filteredItems, {
       unindexedLabel: t('queue.similarityUnindexed'),
     });
     let similarIndex = 0;
@@ -230,7 +294,7 @@ export function RiskQueueScreen({ onCapture, onOpenItem }: RiskQueueScreenProps)
         }),
       };
     });
-  }, [items, t]);
+  }, [filteredItems, t]);
 
   const processingCount = items.filter((i) => i.status === 'pending' || i.status === 'processing').length;
 
@@ -254,11 +318,72 @@ export function RiskQueueScreen({ onCapture, onOpenItem }: RiskQueueScreenProps)
           <View style={styles.headerText}>
             <SectionHeader title={t('queue.title')} />
           </View>
+          {items.length > 0 ? (
+            <HapticPressable
+              style={styles.searchToggle}
+              onPress={() => setSearchOpen((open) => !open)}
+              accessibilityRole="button"
+              accessibilityLabel={
+                searchOpen ? t('queue.hideLabelSearchA11y') : t('queue.showLabelSearchA11y')
+              }
+              accessibilityState={{ expanded: searchOpen }}
+            >
+              <Ionicons
+                name={searchOpen ? 'chevron-up' : 'chevron-down'}
+                size={20}
+                color={labelFilterActive ? colors.primary : colors.textMuted}
+              />
+              {labelFilterActive ? <View style={styles.searchActiveDot} /> : null}
+            </HapticPressable>
+          ) : null}
         </View>
+
+        {searchOpen && items.length > 0 ? (
+          <View style={styles.searchRow}>
+            <Ionicons name="search" size={18} color={colors.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              value={labelQuery}
+              onChangeText={setLabelQuery}
+              placeholder={t('queue.labelSearchPlaceholder')}
+              placeholderTextColor={colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              clearButtonMode="while-editing"
+              returnKeyType="search"
+            />
+            {labelQuery.length > 0 ? (
+              <HapticPressable
+                onPress={() => setLabelQuery('')}
+                accessibilityRole="button"
+                accessibilityLabel={t('queue.clearLabelSearchA11y')}
+                hitSlop={8}
+              >
+                <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+              </HapticPressable>
+            ) : null}
+          </View>
+        ) : null}
 
         {items.length > 0 ? (
           <View style={styles.modeRow}>
             <GroupModeToggle mode={groupMode} onChange={setGroupMode} />
+            {groupMode === 'similarity' ? (
+              <HapticPressable
+                style={[styles.refreshBtn, indexing && styles.refreshBtnDisabled]}
+                onPress={handleRefreshSimilarity}
+                disabled={indexing}
+                accessibilityRole="button"
+                accessibilityLabel={t('queue.refreshSimilarityA11y')}
+              >
+                {indexing ? (
+                  <ActivityIndicator color={colors.primary} size="small" />
+                ) : (
+                  <Ionicons name="refresh" size={16} color={colors.primary} />
+                )}
+                <Text style={styles.refreshBtnText}>{t('queue.refreshSimilarity')}</Text>
+              </HapticPressable>
+            ) : null}
           </View>
         ) : null}
 
@@ -280,6 +405,8 @@ export function RiskQueueScreen({ onCapture, onOpenItem }: RiskQueueScreenProps)
 
         {items.length === 0 ? (
           <Text style={styles.empty}>{t('queue.empty')}</Text>
+        ) : filteredItems.length === 0 ? (
+          <Text style={styles.empty}>{t('queue.labelSearchEmpty')}</Text>
         ) : groupMode === 'time' ? (
           timeSections.map((section) => (
             <View key={section.date} style={styles.section}>
@@ -323,14 +450,74 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 88 },
   headerRow: {
     marginHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
   },
   headerText: {
     flex: 1,
   },
+  searchToggle: {
+    marginTop: 4,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  searchActiveDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+  },
+  searchRow: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  searchInput: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 15,
+    paddingVertical: 4,
+  },
   modeRow: {
     marginHorizontal: 16,
     marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    flexWrap: 'wrap',
   },
+  refreshBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.surface,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  refreshBtnDisabled: { opacity: 0.6 },
+  refreshBtnText: { color: colors.primary, fontWeight: '800', fontSize: 12 },
   modeToggle: {
     flexDirection: 'row',
     alignItems: 'center',
